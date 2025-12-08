@@ -138,18 +138,26 @@
         }
 
         async function loadData() {
-            if (!currentUser) return;
-
-            if (userProfile.role === 'manager') {
-                await loadAllBaristas();
-                await loadAllShifts();
-                await loadAllDeductions();
-            } else {
-                await loadMyShifts();
-                await loadMyDeductions();
+            if (!currentUser || !userProfile) {
+                console.error('Ошибка: пользователь или профиль не загружены');
+                return;
             }
 
-            render();
+            try {
+                if (userProfile.role === 'manager') {
+                    await loadAllBaristas();
+                    await loadAllShifts();
+                    await loadAllDeductions();
+                } else {
+                    await loadMyShifts();
+                    await loadMyDeductions();
+                }
+
+                render();
+            } catch (error) {
+                console.error('Ошибка загрузки данных:', error);
+                alert('Ошибка загрузки данных: ' + error.message);
+            }
         }
 
         async function loadAllBaristas() {
@@ -758,9 +766,23 @@
         onAuthStateChanged(auth, async (user) => {
             currentUser = user;
             if (user) {
-                await loadUserProfile();
-                await loadUserSettings();
-                await loadData();
+                try {
+                    await loadUserProfile();
+                    
+                    // Проверяем, что профиль загружен
+                    if (!userProfile) {
+                        console.error('Ошибка: профиль пользователя не загружен');
+                        alert('Ошибка загрузки профиля. Попробуйте войти снова.');
+                        await logout();
+                        return;
+                    }
+                    
+                    await loadUserSettings();
+                    await loadData();
+                } catch (error) {
+                    console.error('Ошибка при загрузке данных:', error);
+                    alert('Ошибка загрузки данных: ' + error.message);
+                }
             } else {
                 render();
             }
