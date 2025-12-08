@@ -381,6 +381,11 @@
             render();
         }
 
+        function changeBarista(baristaId) {
+            selectedBaristaId = baristaId;
+            render();
+        }
+
         async function migrateOldUsers() {
             if (!confirm('Создать профили для всех пользователей из старых смен?')) return;
             
