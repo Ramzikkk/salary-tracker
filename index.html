@@ -53,33 +53,28 @@
             const password = document.getElementById('auth-password').value;
             const name = document.getElementById('auth-name').value;
             const role = document.getElementById('auth-role').value;
-
+        
             if (!email || !password || !name) {
                 alert('Заполните все поля!');
                 return;
             }
-
+        
             try {
-                // 🔐 ПРОВЕРКА: только указанный email может быть начальником
+                // 🔐 АВТОМАТИЧЕСКОЕ назначение роли
                 const actualRole = email.toLowerCase() === MANAGER_EMAIL.toLowerCase() ? 'manager' : role;
                 
-                if (email.toLowerCase() === MANAGER_EMAIL.toLowerCase() && role !== 'manager') {
-                    alert('⚠️ Этот email зарезервирован для начальника!');
-                    return;
-                }
-
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
-
+        
                 await setDoc(doc(db, 'users', user.uid), {
                     name: name,
                     email: email,
                     role: actualRole,
                     createdAt: new Date().toISOString()
                 });
-
+        
                 await setDoc(doc(db, 'userSettings', user.uid), userSettings);
-
+        
                 alert('✅ Регистрация успешна!');
             } catch (error) {
                 alert('Ошибка: ' + error.message);
