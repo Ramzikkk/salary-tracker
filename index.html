@@ -452,6 +452,30 @@
                 alert('Ошибка: ' + error.message);
             }
         }
+
+        async function cleanInvalidShifts() {
+            if (!confirm('Удалить смены с невалидными userId? Это необратимо!')) return;
+            
+            try {
+                const allUsers = await getDocs(collection(db, 'users'));
+                const validUserIds = new Set(allUsers.docs.map(d => d.id));
+                
+                let deleted = 0;
+                for (const shift of shifts) {
+                    if (!shift.userId || !validUserIds.has(shift.userId)) {
+                        await deleteDoc(doc(db, 'shifts', shift.id));
+                        deleted++;
+                        console.log(`🗑️ Удалена смена ${shift.id} (userId: ${shift.userId})`);
+                    }
+                }
+                
+                alert(`🗑️ Удалено смен с невалидными userId: ${deleted}`);
+                await loadData();
+            } catch (error) {
+                console.error('Ошибка очистки:', error);
+                alert('Ошибка: ' + error.message);
+            }
+        }
             if (!confirm('Удалить смены с невалидными userId? Это необратимо!')) return;
             
             try {
