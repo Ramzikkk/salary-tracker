@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Калькулятор зарплаты</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
+    <div id="app" class="max-w-6xl mx-auto"></div>
+
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getFirestore, collection, addDoc, deleteDoc, doc, getDocs, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        // Firebase конфигурация
+        const firebaseConfig = {
+            apiKey: "AIzaSyBxCYvHpwC37-NuQ_-iNhNpiApS7_qfQps",
+            authDomain: "salary-tracker-b3e7f.firebaseapp.com",
+            projectId: "salary-tracker-b3e7f",
+            storageBucket: "salary-tracker-b3e7f.firebasestorage.app",
+            messagingSenderId: "309704635672",
+            appId: "1:309704635672:web:510375311149bac6701a6d"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+
+        const locations = {
+            box_park: { name: 'Бокс Парк', fullHours: 15, fullSalary: 10000 },
+            aport: { name: 'Апорт', fullHours: 14, fullSalary: 10000 },
+            sary_arka: { name: 'Сары Арка', fullHours: 18, fullSalary: 13000 }
+        };
+
+        let shifts = [];
+        let deductions = [];
+
+        function calculateHourlySalary(location, hours) {
+            const loc = locations[location];
+            const hourlyRate = loc.fullSalary / loc.fullHours;
+            return hourlyRate * hours;
+        }
+
+        function calculateCashBonus(cash) {
+            return cash * 0.03;
+        }
+
+        async function loadData() {
+            try {
+                const shiftsSnapshot = await getDocs(query(collection(db, 'shifts'), orderBy('date', 'desc')));
+                shifts = shiftsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                const deductionsSnapshot = await getDocs(collection(db, 'deductions'));
+                deductions = deductionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+                render();
+            } catch (error) {
+                console.error('Ошибка загрузки:', error);
+                alert('Ошибка загрузки данных. Проверьте подключение к интернету.');
+            }
+        }
+
+        async function addShift() {
+            const date = document.getElementById('shift-date').value;
+            const location = document.getElementById('shift-location').value;
+            const hours = parseFloat(document.getElementById('shift-hours').value);
+            const cash = parseFloat(document.getElementById('shift-cash').value);
+
+            if (!hours || !cash) {
+                alert('Заполните все поля');
+                return;
+            }
+
+            const shift = {
+                date,
+                location,
+                hours,
+                cash,
+                hourlySalary: calculateHourlySalary(location, hours),
+                cashBonus: calculateCashBonus(cash),
+                timestamp: Date.now()
+            };
+
+            try {
+                const docRef = await addDoc(collection(db, 'shifts'), shift);
+                shifts.unshift({ id: docRef.id, ...shift });
+                document.getElementById('shift-hours').value = '';
+                document.getElementById('shift-cash').value = '';
+                render();
+            } catch (error) {
+                console.error('Ошибка добавления:', error);
+                alert('Ошибка добавления смены');
+            }
+        }
+
+        async function deleteShift(id) {
+            if (!confirm('Удалить эту смену?')) return;
+            
+            try {
+                await deleteDoc(doc(db, 'shifts', id));
+                shifts = shifts.filter(s => s.id !== id);
+                render();
+            } catch (error) {
+                console.error('Ошибка удаления:', error);
+                alert('Ошибка удаления смены');
+            }
+        }
+
+        async function addDeduction() {
+            const name = document.getElementById('deduction-name').value;
+            const amount = parseFloat(document.getElementById('deduction-amount').value);
+
+            if (!name || !amount) {
+                alert('Заполните название и сумму');
+                return;
+            }
+
+            const deduction = { name, amount, timestamp: Date.now() };
+
+            try {
+                const docRef = await addDoc(collection(db, 'deductions'), deduction);
+                deductions.push({ id: docRef.id, ...deduction });
+                document.getElementById('deduction-name').value = '';
+                document.getElementById('deduction-amount').value = '';
+                render();
+            } catch (error) {
+                console.error('Ошибка добавления вычета:', error);
+                alert('Ошибка добавления вычета');
+            }
+        }
+
+        async function deleteDeduction(id) {
+            if (!confirm('Удалить этот вычет?')) return;
+
+            try {
+                await deleteDoc(doc(db, 'deductions', id));
+                deductions = deductions.filter(d => d.id !== id);
+                render();
+            } catch (error) {
+                console.error('Ошибка удаления вычета:', error);
+                alert('Ошибка удаления вычета');
+            }
+        }
+
+        function getStatsByLocation() {
+            const stats = {};
+            
+            Object.keys(locations).forEach(key => {
+                stats[key] = {
+                    name: locations[key].name,
+                    shifts: 0,
+                    hours: 0,
+                    cash: 0,
+                    hourlySalary: 0,
+                    cashBonus: 0,
+                    total: 0
+                };
+            });
+
+            shifts.forEach(shift => {
+                stats[shift.location].shifts++;
+                stats[shift.location].hours += shift.hours;
+                stats[shift.location].cash += shift.cash;
+                stats[shift.location].hourlySalary += shift.hourlySalary;
+                stats[shift.location].cashBonus += shift.cashBonus;
+                stats[shift.location].total += shift.hourlySalary + shift.cashBonus;
+            });
+
+            return stats;
+        }
+
+        function getTotals() {
+            const totalShifts = shifts.length;
+            const totalHours = shifts.reduce((sum, s) => sum + s.hours, 0);
+            const totalCash = shifts.reduce((sum, s) => sum + s.cash, 0);
+            const totalHourlySalary = shifts.reduce((sum, s) => sum + s.hourlySalary, 0);
+            const totalCashBonus = shifts.reduce((sum, s) => sum + s.cashBonus, 0);
+            const totalDeductions = deductions.reduce((sum, d) => sum + d.amount, 0);
+            const grossTotal = totalHourlySalary + totalCashBonus;
+            const netTotal = grossTotal - totalDeductions;
+
+            return {
+                totalShifts,
+                totalHours,
+                totalCash,
+                totalHourlySalary,
+                totalCashBonus,
+                totalDeductions,
+                grossTotal,
+                netTotal
+            };
+        }
+
+        function render() {
+            const stats = getStatsByLocation();
+            const totals = getTotals();
+            const today = new Date().toISOString().split('T')[0];
+
+            document.getElementById('app').innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                    <h1 class="text-3xl font-bold text-gray-800 mb-2 flex items-center gap-2">
+                        💰 Калькулятор зарплаты
+                    </h1>
+                    <p class="text-gray-600">Синхронизация через Firebase - доступно на всех устройствах</p>
+                </div>
+
+                <div class="grid md:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">➕ Добавить смену</h2>
+                        
+                        <div class="space-y-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">📅 Дата</label>
+                                <input type="date" id="shift-date" value="${today}" 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">📍 Точка</label>
+                                <select id="shift-location" 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                    ${Object.entries(locations).map(([key, loc]) => 
+                                        `<option value="${key}">${loc.name} (${loc.fullHours}ч - ${loc.fullSalary}₸)</option>`
+                                    ).join('')}
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">⏰ Часы</label>
+                                <input type="number" step="0.5" id="shift-hours" placeholder="Например: 5" 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">💵 Касса (₸)</label>
+                                <input type="number" id="shift-cash" placeholder="Например: 50000" 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            </div>
+
+                            <button onclick="window.addShift()" 
+                                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition">
+                                ➕ Добавить смену
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">💸 Вычеты</h2>
+                        
+                        <div class="space-y-4 mb-4">
+                            <input type="text" id="deduction-name" placeholder="Название (аванс, штраф)" 
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <input type="number" id="deduction-amount" placeholder="Сумма (₸)" 
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <button onclick="window.addDeduction()" 
+                                class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 rounded-lg transition">
+                                Добавить вычет
+                            </button>
+                        </div>
+
+                        <div class="space-y-2 max-h-64 overflow-y-auto">
+                            ${deductions.map(d => `
+                                <div class="flex justify-between items-center bg-red-50 p-3 rounded-lg">
+                                    <div>
+                                        <div class="font-semibold text-gray-800">${d.name}</div>
+                                        <div class="text-red-600">-${d.amount.toLocaleString()}₸</div>
+                                    </div>
+                                    <button onclick="window.deleteDeduction('${d.id}')" 
+                                        class="text-red-600 hover:text-red-800 text-xl">🗑️</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📋 История смен</h2>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Дата</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Точка</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Часы</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Касса</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (оклад)</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (касса)</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Итого</th>
+                                    <th class="px-4 py-3"></th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${shifts.map(shift => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-4 py-3 text-sm text-gray-700">${shift.date}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">${locations[shift.location].name}</td>
+                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.hours}ч</td>
+                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
+                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
+                                            ${shift.hourlySalary.toFixed(0).toLocaleString()}₸
+                                        </td>
+                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
+                                            ${shift.cashBonus.toFixed(0).toLocaleString()}₸
+                                        </td>
+                                        <td class="px-4 py-3 text-sm text-right text-indigo-600 font-bold">
+                                            ${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <button onclick="window.deleteShift('${shift.id}')" 
+                                                class="text-red-600 hover:text-red-800 text-xl">🗑️</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="grid md:grid-cols-3 gap-6 mb-6">
+                    ${Object.entries(stats).map(([key, stat]) => `
+                        <div class="bg-white rounded-xl shadow-lg p-6">
+                            <h3 class="text-lg font-bold text-gray-800 mb-4">${stat.name}</h3>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Смен:</span>
+                                    <span class="font-semibold">${stat.shifts}</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Часов:</span>
+                                    <span class="font-semibold">${stat.hours.toFixed(1)}ч</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">Касса:</span>
+                                    <span class="font-semibold">${stat.cash.toLocaleString()}₸</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">ЗП (оклад):</span>
+                                    <span class="font-semibold text-green-600">${stat.hourlySalary.toFixed(0).toLocaleString()}₸</span>
+                                </div>
+                                <div class="flex justify-between">
+                                    <span class="text-gray-600">ЗП (касса 3%):</span>
+                                    <span class="font-semibold text-green-600">${stat.cashBonus.toFixed(0).toLocaleString()}₸</span>
+                                </div>
+                                <div class="flex justify-between pt-2 border-t">
+                                    <span class="text-gray-800 font-bold">Всего:</span>
+                                    <span class="font-bold text-indigo-600">${stat.total.toFixed(0).toLocaleString()}₸</span>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white">
+                    <h2 class="text-2xl font-bold mb-6">📊 Общая статистика</h2>
+                    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Всего смен</div>
+                            <div class="text-3xl font-bold">${totals.totalShifts}</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Всего часов</div>
+                            <div class="text-3xl font-bold">${totals.totalHours.toFixed(1)}ч</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Общая касса</div>
+                            <div class="text-2xl font-bold">${totals.totalCash.toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">ЗП с оклада</div>
+                            <div class="text-2xl font-bold">${totals.totalHourlySalary.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">ЗП с кассы (3%)</div>
+                            <div class="text-2xl font-bold">${totals.totalCashBonus.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Всего заработано</div>
+                            <div class="text-2xl font-bold">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Вычеты</div>
+                            <div class="text-2xl font-bold text-red-300">-${totals.totalDeductions.toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-30 rounded-lg p-4 border-2 border-white">
+                            <div class="text-sm opacity-90 mb-1">ИТОГО К ПОЛУЧЕНИЮ</div>
+                            <div class="text-3xl font-bold">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        window.addShift = addShift;
+        window.deleteShift = deleteShift;
+        window.addDeduction = addDeduction;
+        window.deleteDeduction = deleteDeduction;
+
+        loadData();
+    </script>
+</body>
+</html>
