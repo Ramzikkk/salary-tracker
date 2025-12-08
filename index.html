@@ -5,17 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Калькулятор зарплаты</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-    </style>
 </head>
-<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen p-4">
-    <div id="app" class="max-w-6xl mx-auto"></div>
+<body class="bg-gradient-to-br from-gray-100 to-gray-200 min-h-screen">
+    <div id="app" class="container mx-auto px-4 py-8 max-w-7xl"></div>
 
     <script type="module">
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
-        import { getFirestore, collection, addDoc, deleteDoc, doc, getDocs, query, where, orderBy, updateDoc, setDoc, getDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, setDoc, getDoc, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
         const firebaseConfig = {
             apiKey: "AIzaSyBxCYvHpwC37-NuQ_-iNhNpiApS7_qfQps",
@@ -27,185 +24,70 @@
         };
 
         const app = initializeApp(firebaseConfig);
-        const db = getFirestore(app);
         const auth = getAuth(app);
-
-        const defaultLocations = {
-            box_park: { name: 'Бокс Парк', fullHours: 15, fullSalary: 10000 },
-            aport: { name: 'Апорт', fullHours: 14, fullSalary: 10000 },
-            sary_arka: { name: 'Сары Арка', fullHours: 18, fullSalary: 13000 }
-        };
-
-        const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
-                           'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+        const db = getFirestore(app);
 
         let currentUser = null;
+        let userProfile = null;
         let shifts = [];
         let deductions = [];
-        let userSettings = {
-            locations: {...defaultLocations},
-            cashPercent: 3
-        };
+        let allBaristas = [];
         let selectedMonth = 'all';
+        let selectedBaristaId = 'all';
         let showSettings = false;
-
-        function calculateHours(startTime, endTime) {
-            const [startHour, startMin] = startTime.split(':').map(Number);
-            const [endHour, endMin] = endTime.split(':').map(Number);
-            
-            let hours = endHour - startHour;
-            let minutes = endMin - startMin;
-            
-            if (hours < 0 || (hours === 0 && minutes < 0)) {
-                hours += 24;
+        let userSettings = {
+            cashPercent: 3,
+            locations: {
+                boxpark: { name: 'Бокс парк', fullHours: 15, fullSalary: 10000 },
+                aport: { name: 'Апорт', fullHours: 14, fullSalary: 10000 },
+                saryarka: { name: 'Сары арка', fullHours: 18, fullSalary: 13000 }
             }
-            
-            return hours + (minutes / 60);
-        }
+        };
 
-        function calculateHourlySalary(location, hours) {
-            const loc = userSettings.locations[location];
-            const hourlyRate = loc.fullSalary / loc.fullHours;
-            return hourlyRate * hours;
-        }
-
-        function calculateCashBonus(cash) {
-            return cash * (userSettings.cashPercent / 100);
-        }
-
-        function getMonthKey(date) {
-            const d = new Date(date);
-            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-        }
-
-        function getMonthName(monthKey) {
-            if (monthKey === 'all') return 'Все время';
-            const [year, month] = monthKey.split('-');
-            return `${monthNames[parseInt(month) - 1]} ${year}`;
-        }
-
-        function getAvailableMonths() {
-            const months = new Set();
-            shifts.forEach(shift => {
-                months.add(getMonthKey(shift.date));
-            });
-            return Array.from(months).sort().reverse();
-        }
-
-        function filterShiftsByMonth(month) {
-            if (month === 'all') return shifts;
-            return shifts.filter(shift => getMonthKey(shift.date) === month);
-        }
-
-        function filterDeductionsByMonth(month) {
-            if (month === 'all') return deductions;
-            return deductions.filter(d => d.month === month);
-        }
-
-        async function loadUserSettings() {
-            if (!currentUser) return;
-            
-            try {
-                const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
-                if (settingsDoc.exists()) {
-                    userSettings = settingsDoc.data();
-                } else {
-                    userSettings = {
-                        locations: {...defaultLocations},
-                        cashPercent: 3
-                    };
-                    await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
-                }
-            } catch (error) {
-                console.error('Ошибка загрузки настроек:', error);
-            }
-        }
-
-        async function saveUserSettings() {
-            if (!currentUser) return;
-            
-            try {
-                await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
-                alert('Настройки сохранены!');
-                showSettings = false;
-                render();
-            } catch (error) {
-                console.error('Ошибка сохранения настроек:', error);
-                alert('Ошибка сохранения настроек');
-            }
-        }
-
-        async function loadData() {
-            if (!currentUser) return;
-            
-            try {
-                const shiftsSnapshot = await getDocs(
-                    query(collection(db, 'shifts'), 
-                          where('userId', '==', currentUser.uid),
-                          orderBy('date', 'desc'))
-                );
-                shifts = shiftsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-                const deductionsSnapshot = await getDocs(
-                    query(collection(db, 'deductions'), 
-                          where('userId', '==', currentUser.uid))
-                );
-                deductions = deductionsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
-                render();
-            } catch (error) {
-                console.error('Ошибка загрузки:', error);
-                alert('Ошибка загрузки данных. Проверьте подключение к интернету.');
-            }
-        }
-
+        // === AUTH FUNCTIONS ===
         async function register() {
-            const email = document.getElementById('reg-email').value;
-            const password = document.getElementById('reg-password').value;
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const name = document.getElementById('auth-name').value;
+            const role = document.getElementById('auth-role').value;
 
-            if (!email || !password) {
-                alert('Заполните все поля');
-                return;
-            }
-
-            if (password.length < 6) {
-                alert('Пароль должен быть минимум 6 символов');
+            if (!email || !password || !name) {
+                alert('Заполните все поля!');
                 return;
             }
 
             try {
-                await createUserWithEmailAndPassword(auth, email, password);
-                alert('Регистрация успешна!');
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                await setDoc(doc(db, 'users', user.uid), {
+                    name: name,
+                    email: email,
+                    role: role,
+                    createdAt: new Date().toISOString()
+                });
+
+                await setDoc(doc(db, 'userSettings', user.uid), userSettings);
+
+                alert('✅ Регистрация успешна!');
             } catch (error) {
-                console.error('Ошибка регистрации:', error);
-                if (error.code === 'auth/email-already-in-use') {
-                    alert('Этот email уже зарегистрирован');
-                } else if (error.code === 'auth/invalid-email') {
-                    alert('Неверный формат email');
-                } else {
-                    alert('Ошибка регистрации: ' + error.message);
-                }
+                alert('Ошибка: ' + error.message);
             }
         }
 
         async function login() {
-            const email = document.getElementById('login-email').value;
-            const password = document.getElementById('login-password').value;
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
 
             if (!email || !password) {
-                alert('Заполните все поля');
+                alert('Введите email и пароль!');
                 return;
             }
 
             try {
                 await signInWithEmailAndPassword(auth, email, password);
             } catch (error) {
-                console.error('Ошибка входа:', error);
-                if (error.code === 'auth/invalid-credential') {
-                    alert('Неверный email или пароль');
-                } else {
-                    alert('Ошибка входа: ' + error.message);
-                }
+                alert('Ошибка входа: ' + error.message);
             }
         }
 
@@ -213,13 +95,84 @@
             try {
                 await signOut(auth);
                 currentUser = null;
+                userProfile = null;
                 shifts = [];
                 deductions = [];
                 selectedMonth = 'all';
+                showSettings = false;
                 render();
             } catch (error) {
-                console.error('Ошибка выхода:', error);
+                alert('Ошибка выхода: ' + error.message);
             }
+        }
+
+        async function loadUserProfile() {
+            if (!currentUser) return;
+            
+            const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+            if (userDoc.exists()) {
+                userProfile = { id: currentUser.uid, ...userDoc.data() };
+            }
+        }
+
+        async function loadUserSettings() {
+            if (!currentUser) return;
+            
+            const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
+            if (settingsDoc.exists()) {
+                userSettings = settingsDoc.data();
+            } else {
+                await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
+            }
+        }
+
+        // === DATA FUNCTIONS ===
+        async function loadData() {
+            if (!currentUser) return;
+
+            if (userProfile.role === 'manager') {
+                await loadAllBaristas();
+                await loadAllShifts();
+                await loadAllDeductions();
+            } else {
+                await loadMyShifts();
+                await loadMyDeductions();
+            }
+
+            render();
+        }
+
+        async function loadAllBaristas() {
+            const q = query(collection(db, 'users'), where('role', 'in', ['barista', 'intern']));
+            const snapshot = await getDocs(q);
+            allBaristas = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        async function loadAllShifts() {
+            const q = query(collection(db, 'shifts'), orderBy('date', 'desc'));
+            const snapshot = await getDocs(q);
+            shifts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        async function loadAllDeductions() {
+            const snapshot = await getDocs(collection(db, 'deductions'));
+            deductions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        async function loadMyShifts() {
+            const q = query(
+                collection(db, 'shifts'),
+                where('userId', '==', currentUser.uid),
+                orderBy('date', 'desc')
+            );
+            const snapshot = await getDocs(q);
+            shifts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        async function loadMyDeductions() {
+            const q = query(collection(db, 'deductions'), where('userId', '==', currentUser.uid));
+            const snapshot = await getDocs(q);
+            deductions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
 
         async function addShift() {
@@ -227,43 +180,52 @@
             const location = document.getElementById('shift-location').value;
             const startTime = document.getElementById('shift-start').value;
             const endTime = document.getElementById('shift-end').value;
-            const cash = parseFloat(document.getElementById('shift-cash').value);
+            const cash = parseFloat(document.getElementById('shift-cash').value) || 0;
 
-            if (!startTime || !endTime || !cash) {
-                alert('Заполните все поля');
+            if (!date || !startTime || !endTime) {
+                alert('Заполните все поля!');
                 return;
             }
 
             const hours = calculateHours(startTime, endTime);
-
-            if (hours <= 0) {
-                alert('Время окончания должно быть позже времени начала');
-                return;
+            const isIntern = userProfile.role === 'intern';
+            
+            let hourlySalary, cashBonus;
+            
+            if (isIntern) {
+                hourlySalary = (5000 / 8) * hours;
+                cashBonus = 0;
+            } else {
+                const loc = userSettings.locations[location];
+                const hourlyRate = loc.fullSalary / loc.fullHours;
+                hourlySalary = hourlyRate * hours;
+                cashBonus = cash * (userSettings.cashPercent / 100);
             }
 
-            const shift = {
+            const shiftData = {
                 userId: currentUser.uid,
-                date,
-                location,
-                startTime,
-                endTime,
-                hours,
-                cash,
-                hourlySalary: calculateHourlySalary(location, hours),
-                cashBonus: calculateCashBonus(cash),
-                timestamp: Date.now()
+                userName: userProfile.name,
+                userRole: userProfile.role,
+                date: date,
+                location: location,
+                startTime: startTime,
+                endTime: endTime,
+                hours: hours,
+                cash: cash,
+                hourlySalary: hourlySalary,
+                cashBonus: cashBonus,
+                cashPercent: userSettings.cashPercent,
+                createdAt: new Date().toISOString()
             };
 
             try {
-                const docRef = await addDoc(collection(db, 'shifts'), shift);
-                shifts.unshift({ id: docRef.id, ...shift });
+                await addDoc(collection(db, 'shifts'), shiftData);
+                document.getElementById('shift-cash').value = '';
                 document.getElementById('shift-start').value = '';
                 document.getElementById('shift-end').value = '';
-                document.getElementById('shift-cash').value = '';
-                render();
+                await loadData();
             } catch (error) {
-                console.error('Ошибка добавления:', error);
-                alert('Ошибка добавления смены');
+                alert('Ошибка: ' + error.message);
             }
         }
 
@@ -272,62 +234,68 @@
             
             try {
                 await deleteDoc(doc(db, 'shifts', id));
-                shifts = shifts.filter(s => s.id !== id);
-                render();
+                await loadData();
             } catch (error) {
-                console.error('Ошибка удаления:', error);
-                alert('Ошибка удаления смены');
+                alert('Ошибка: ' + error.message);
             }
         }
 
         async function addDeduction() {
             const name = document.getElementById('deduction-name').value;
             const amount = parseFloat(document.getElementById('deduction-amount').value);
-            const month = selectedMonth === 'all' ? getMonthKey(new Date().toISOString().split('T')[0]) : selectedMonth;
 
             if (!name || !amount) {
-                alert('Заполните название и сумму');
+                alert('Заполните все поля!');
                 return;
             }
 
-            const deduction = { 
+            const monthKey = selectedMonth === 'all' ? new Date().toISOString().slice(0, 7) : selectedMonth;
+
+            const deductionData = {
                 userId: currentUser.uid,
-                name, 
-                amount, 
-                month, 
-                timestamp: Date.now() 
+                userName: userProfile.name,
+                name: name,
+                amount: amount,
+                month: monthKey,
+                createdAt: new Date().toISOString()
             };
 
             try {
-                const docRef = await addDoc(collection(db, 'deductions'), deduction);
-                deductions.push({ id: docRef.id, ...deduction });
+                await addDoc(collection(db, 'deductions'), deductionData);
                 document.getElementById('deduction-name').value = '';
                 document.getElementById('deduction-amount').value = '';
-                render();
+                await loadData();
             } catch (error) {
-                console.error('Ошибка добавления вычета:', error);
-                alert('Ошибка добавления вычета');
+                alert('Ошибка: ' + error.message);
             }
         }
 
         async function deleteDeduction(id) {
             if (!confirm('Удалить этот вычет?')) return;
-
+            
             try {
                 await deleteDoc(doc(db, 'deductions', id));
-                deductions = deductions.filter(d => d.id !== id);
-                render();
+                await loadData();
             } catch (error) {
-                console.error('Ошибка удаления вычета:', error);
-                alert('Ошибка удаления вычета');
+                alert('Ошибка: ' + error.message);
             }
         }
 
-        function changeMonth(month) {
-            selectedMonth = month;
-            render();
+        function calculateHours(start, end) {
+            const [startH, startM] = start.split(':').map(Number);
+            const [endH, endM] = end.split(':').map(Number);
+            
+            let startMinutes = startH * 60 + startM;
+            let endMinutes = endH * 60 + endM;
+            
+            if (endMinutes <= startMinutes) {
+                endMinutes += 24 * 60;
+            }
+            
+            return (endMinutes - startMinutes) / 60;
         }
 
+        // === SETTINGS FUNCTIONS ===
         function toggleSettings() {
             showSettings = !showSettings;
             render();
@@ -341,43 +309,89 @@
             userSettings.cashPercent = parseFloat(value);
         }
 
-        function getStatsByLocation(monthShifts) {
-            const stats = {};
+        async function saveUserSettings() {
+            try {
+                await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
+                alert('✅ Настройки сохранены!');
+                showSettings = false;
+                render();
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        // === FILTER & STATS FUNCTIONS ===
+        function changeMonth(month) {
+            selectedMonth = month;
+            render();
+        }
+
+        function changeBarista(baristaId) {
+            selectedBaristaId = baristaId;
+            render();
+        }
+
+        function getAvailableMonths(shiftsArray) {
+            const months = new Set(shiftsArray.map(s => s.date.slice(0, 7)));
+            return Array.from(months).sort().reverse();
+        }
+
+        function filterShiftsByMonth(shiftsArray, month) {
+            if (month === 'all') return shiftsArray;
+            return shiftsArray.filter(s => s.date.startsWith(month));
+        }
+
+        function filterDeductionsByMonth(deductionsArray, month) {
+            if (month === 'all') return deductionsArray;
+            return deductionsArray.filter(d => d.month === month);
+        }
+
+        function filterShiftsByBarista(shiftsArray, baristaId) {
+            if (baristaId === 'all') return shiftsArray;
+            return shiftsArray.filter(s => s.userId === baristaId);
+        }
+
+        function getMonthName(monthKey) {
+            if (monthKey === 'all') return 'Общая статистика';
+            const months = ['янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+            const [year, month] = monthKey.split('-');
+            return `${months[parseInt(month) - 1]} ${year}`;
+        }
+
+        function getStatsByLocation(shiftsArray, isIntern) {
+            if (isIntern) return {};
             
-            Object.keys(userSettings.locations).forEach(key => {
-                stats[key] = {
-                    name: userSettings.locations[key].name,
-                    shifts: 0,
-                    hours: 0,
-                    cash: 0,
-                    hourlySalary: 0,
-                    cashBonus: 0,
-                    total: 0
-                };
-            });
-
-            monthShifts.forEach(shift => {
-                if (stats[shift.location]) {
-                    stats[shift.location].shifts++;
-                    stats[shift.location].hours += shift.hours;
-                    stats[shift.location].cash += shift.cash;
-                    stats[shift.location].hourlySalary += shift.hourlySalary;
-                    stats[shift.location].cashBonus += shift.cashBonus;
-                    stats[shift.location].total += shift.hourlySalary + shift.cashBonus;
+            const stats = {};
+            shiftsArray.forEach(shift => {
+                if (!stats[shift.location]) {
+                    stats[shift.location] = {
+                        name: userSettings.locations[shift.location]?.name || 'Неизвестно',
+                        shifts: 0,
+                        hours: 0,
+                        cash: 0,
+                        hourlySalary: 0,
+                        cashBonus: 0,
+                        total: 0
+                    };
                 }
+                stats[shift.location].shifts++;
+                stats[shift.location].hours += shift.hours;
+                stats[shift.location].cash += shift.cash;
+                stats[shift.location].hourlySalary += shift.hourlySalary;
+                stats[shift.location].cashBonus += shift.cashBonus;
+                stats[shift.location].total += shift.hourlySalary + shift.cashBonus;
             });
-
             return stats;
         }
 
-        function getTotals(monthShifts, monthDeductions) {
-            const totalShifts = monthShifts.length;
-            const totalHours = monthShifts.reduce((sum, s) => sum + s.hours, 0);
-            const totalCash = monthShifts.reduce((sum, s) => sum + s.cash, 0);
-            const totalHourlySalary = monthShifts.reduce((sum, s) => sum + s.hourlySalary, 0);
-            const totalCashBonus = monthShifts.reduce((sum, s) => sum + s.cashBonus, 0);
-            const totalDeductions = monthDeductions.reduce((sum, d) => sum + d.amount, 0);
+        function getTotals(shiftsArray, deductionsArray) {
+            const totalShifts = shiftsArray.length;
+            const totalHours = shiftsArray.reduce((sum, s) => sum + s.hours, 0);
+            const totalCash = shiftsArray.reduce((sum, s) => sum + s.cash, 0);
+            const totalHourlySalary = shiftsArray.reduce((sum, s) => sum + s.hourlySalary, 0);
+            const totalCashBonus = shiftsArray.reduce((sum, s) => sum + s.cashBonus, 0);
             const grossTotal = totalHourlySalary + totalCashBonus;
+            const totalDeductions = deductionsArray.reduce((sum, d) => sum + d.amount, 0);
             const netTotal = grossTotal - totalDeductions;
 
             return {
@@ -386,58 +400,206 @@
                 totalCash,
                 totalHourlySalary,
                 totalCashBonus,
-                totalDeductions,
                 grossTotal,
+                totalDeductions,
                 netTotal
             };
         }
 
+        // === RENDER FUNCTIONS ===
         function renderAuth() {
             document.getElementById('app').innerHTML = `
                 <div class="max-w-md mx-auto">
-                    <div class="bg-white rounded-2xl shadow-xl p-8 mb-6">
-                        <h1 class="text-3xl font-bold text-gray-800 mb-2 text-center">
-                            💰 Калькулятор зарплаты
-                        </h1>
-                        <p class="text-gray-600 text-center mb-8">Ваш личный трекер доходов</p>
-
-                        <div class="space-y-6">
-                            <div>
-                                <h2 class="text-xl font-bold text-gray-800 mb-4">🔐 Вход</h2>
-                                <div class="space-y-3">
-                                    <input type="email" id="login-email" placeholder="Email" 
-                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                    <input type="password" id="login-password" placeholder="Пароль" 
-                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                    <button onclick="window.login()" 
-                                        class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 rounded-lg transition">
-                                        Войти
-                                    </button>
-                                </div>
-                            </div>
-
-                            <div class="border-t pt-6">
-                                <h2 class="text-xl font-bold text-gray-800 mb-4">✨ Регистрация</h2>
-                                <div class="space-y-3">
-                                    <input type="email" id="reg-email" placeholder="Email" 
-                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500">
-                                    <input type="password" id="reg-password" placeholder="Пароль (минимум 6 символов)" 
-                                        class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-green-500">
-                                    <button onclick="window.register()" 
-                                        class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition">
-                                        Зарегистрироваться
-                                    </button>
-                                </div>
-                            </div>
+                    <div class="bg-white rounded-2xl shadow-2xl p-8">
+                        <div class="text-center mb-8">
+                            <h1 class="text-4xl font-bold text-gray-800 mb-2">💰 Калькулятор</h1>
+                            <p class="text-gray-600">Зарплаты барист</p>
                         </div>
 
-                        <div class="mt-6 p-4 bg-blue-50 rounded-lg">
-                            <p class="text-sm text-blue-800">
-                                <strong>💡 Совет:</strong> Используйте любой email (даже выдуманный) для регистрации. 
-                                Главное - запомните его и пароль!
-                            </p>
+                        <div class="space-y-4 mb-6">
+                            <input type="email" id="auth-email" placeholder="Email" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            <input type="password" id="auth-password" placeholder="Пароль" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            <input type="text" id="auth-name" placeholder="Ваше имя" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            <select id="auth-role" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                                <option value="barista">☕ Бариста</option>
+                                <option value="intern">👨‍🎓 Стажёр</option>
+                                <option value="manager">👔 Начальник</option>
+                            </select>
+                        </div>
+
+                        <div class="space-y-3">
+                            <button onclick="window.login()" 
+                                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition">
+                                🔑 Войти
+                            </button>
+                            <button onclick="window.register()" 
+                                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition">
+                                ➕ Регистрация
+                            </button>
                         </div>
                     </div>
+                </div>
+            `;
+        }
+
+        function renderManagerView() {
+            const baristaShifts = selectedBaristaId === 'all' 
+                ? shifts 
+                : filterShiftsByBarista(shifts, selectedBaristaId);
+
+            const baristaDeductions = selectedBaristaId === 'all'
+                ? deductions
+                : deductions.filter(d => d.userId === selectedBaristaId);
+
+            const availableMonths = getAvailableMonths(baristaShifts);
+            const monthShifts = filterShiftsByMonth(baristaShifts, selectedMonth);
+            const monthDeductions = filterDeductionsByMonth(baristaDeductions, selectedMonth);
+
+            const groupedByBarista = {};
+            monthShifts.forEach(shift => {
+                if (!groupedByBarista[shift.userId]) {
+                    groupedByBarista[shift.userId] = {
+                        name: shift.userName,
+                        role: shift.userRole,
+                        shifts: [],
+                        deductions: []
+                    };
+                }
+                groupedByBarista[shift.userId].shifts.push(shift);
+            });
+
+            monthDeductions.forEach(deduction => {
+                if (groupedByBarista[deduction.userId]) {
+                    groupedByBarista[deduction.userId].deductions.push(deduction);
+                }
+            });
+
+            document.getElementById('app').innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                    <div class="flex justify-between items-center flex-wrap gap-4">
+                        <div>
+                            <h1 class="text-3xl font-bold text-gray-800 mb-2">👔 Панель начальника</h1>
+                            <p class="text-gray-600">${userProfile.name} (${currentUser.email})</p>
+                        </div>
+                        <button onclick="window.logout()" 
+                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
+                            🚪 Выход
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">👥 Выберите бариста</h2>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="window.changeBarista('all')" 
+                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                            Все бариста
+                        </button>
+                        ${allBaristas.map(barista => `
+                            <button onclick="window.changeBarista('${barista.id}')" 
+                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+
+                ${availableMonths.length > 0 ? `
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Выберите период</h2>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="window.changeMonth('all')" 
+                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                            Все время
+                        </button>
+                        ${availableMonths.map(month => `
+                            <button onclick="window.changeMonth('${month}')" 
+                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === month ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                ${getMonthName(month)}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="space-y-6">
+                    ${Object.entries(groupedByBarista).map(([userId, data]) => {
+                        const totals = getTotals(data.shifts, data.deductions);
+                        const isIntern = data.role === 'intern';
+                        const roleLabel = isIntern ? '👨‍🎓 Стажёр' : '☕ Бариста';
+
+                        return `
+                            <div class="bg-white rounded-xl shadow-lg p-6">
+                                <h2 class="text-2xl font-bold text-gray-800 mb-4">${roleLabel}: ${data.name}</h2>
+                                
+                                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                                    <div class="bg-blue-50 rounded-lg p-4">
+                                        <div class="text-sm text-blue-600 mb-1">Смен</div>
+                                        <div class="text-2xl font-bold text-blue-900">${totals.totalShifts}</div>
+                                    </div>
+                                    <div class="bg-purple-50 rounded-lg p-4">
+                                        <div class="text-sm text-purple-600 mb-1">Часов</div>
+                                        <div class="text-2xl font-bold text-purple-900">${totals.totalHours.toFixed(1)}ч</div>
+                                    </div>
+                                    <div class="bg-green-50 rounded-lg p-4">
+                                        <div class="text-sm text-green-600 mb-1">Заработано</div>
+                                        <div class="text-2xl font-bold text-green-900">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
+                                    </div>
+                                    <div class="bg-indigo-50 rounded-lg p-4">
+                                        <div class="text-sm text-indigo-600 mb-1">К выплате</div>
+                                        <div class="text-2xl font-bold text-indigo-900">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
+                                    </div>
+                                </div>
+
+                                ${data.shifts.length > 0 ? `
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-sm">
+                                        <thead class="bg-gray-50">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Дата</th>
+                                                ${!isIntern ? '<th class="px-3 py-2 text-left font-semibold text-gray-700">Точка</th>' : ''}
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Время</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Часы</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Касса</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">ЗП</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-200">
+                                            ${data.shifts.map(shift => `
+                                                <tr class="hover:bg-gray-50">
+                                                    <td class="px-3 py-2 text-gray-700">${shift.date}</td>
+                                                    ${!isIntern ? `<td class="px-3 py-2 text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
+                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
+                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
+                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
+                                                    <td class="px-3 py-2 text-right font-semibold text-green-600">${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                ` : '<p class="text-gray-500 text-center py-4">Нет смен за выбранный период</p>'}
+
+                                ${data.deductions.length > 0 ? `
+                                <div class="mt-4">
+                                    <h3 class="font-bold text-gray-800 mb-2">💸 Вычеты:</h3>
+                                    <div class="space-y-1">
+                                        ${data.deductions.map(d => `
+                                            <div class="flex justify-between bg-red-50 px-3 py-2 rounded">
+                                                <span class="text-gray-700">${d.name}</span>
+                                                <span class="text-red-600 font-semibold">-${d.amount.toLocaleString()}₸</span>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    }).join('')}
                 </div>
             `;
         }
@@ -516,26 +678,31 @@
             `;
         }
 
-        function renderMain() {
-            const availableMonths = getAvailableMonths();
-            const monthShifts = filterShiftsByMonth(selectedMonth);
-            const monthDeductions = filterDeductionsByMonth(selectedMonth);
-            const stats = getStatsByLocation(monthShifts);
+        function renderBaristaView() {
+            const availableMonths = getAvailableMonths(shifts);
+            const monthShifts = filterShiftsByMonth(shifts, selectedMonth);
+            const monthDeductions = filterDeductionsByMonth(deductions, selectedMonth);
+            const isIntern = userProfile.role === 'intern';
+            const stats = getStatsByLocation(monthShifts, isIntern);
             const totals = getTotals(monthShifts, monthDeductions);
             const today = new Date().toISOString().split('T')[0];
 
+            const roleLabel = isIntern ? '👨‍🎓 Стажёр' : '☕ Бариста';
+
             document.getElementById('app').innerHTML = `
                 <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
-                    <div class="flex justify-between items-center">
+                    <div class="flex justify-between items-center flex-wrap gap-4">
                         <div>
                             <h1 class="text-3xl font-bold text-gray-800 mb-2">💰 Калькулятор зарплаты</h1>
-                            <p class="text-gray-600">Вы вошли как: ${currentUser.email}</p>
+                            <p class="text-gray-600">${roleLabel}: ${userProfile.name} (${currentUser.email})</p>
                         </div>
                         <div class="flex gap-2">
+                            ${!isIntern ? `
                             <button onclick="window.toggleSettings()" 
                                 class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition">
                                 ⚙️ Настройки
                             </button>
+                            ` : ''}
                             <button onclick="window.logout()" 
                                 class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
                                 🚪 Выход
@@ -543,6 +710,14 @@
                         </div>
                     </div>
                 </div>
+
+                ${isIntern ? `
+                <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-6">
+                    <p class="text-blue-800">
+                        <strong>ℹ️ Стажёр:</strong> Ваша ставка: 8 часов = 5000₸ на любой точке
+                    </p>
+                </div>
+                ` : ''}
 
                 ${availableMonths.length > 0 ? `
                 <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
@@ -611,6 +786,7 @@
                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                             </div>
 
+                            ${!isIntern ? `
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">📍 Точка</label>
                                 <select id="shift-location" 
@@ -620,6 +796,12 @@
                                     ).join('')}
                                 </select>
                             </div>
+                            ` : `
+                            <input type="hidden" id="shift-location" value="intern">
+                            <div class="bg-blue-50 p-3 rounded-lg">
+                                <p class="text-sm text-blue-800">Стажёр: 8ч = 5000₸</p>
+                            </div>
+                            `}
 
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
@@ -676,6 +858,7 @@
                     </div>
                 </div>
 
+                ${!isIntern && Object.keys(stats).length > 0 ? `
                 <div class="grid md:grid-cols-3 gap-6 mb-6">
                     ${Object.entries(stats).map(([key, stat]) => `
                         <div class="bg-white rounded-xl shadow-lg p-6">
@@ -709,15 +892,16 @@
                         </div>
                     `).join('')}
                 </div>
+                ` : ''}
 
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-lg p-6">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">📋 История смен</h2>
                     <div class="overflow-x-auto">
                         <table class="w-full">
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Дата</th>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Точка</th>
+                                    ${!isIntern ? '<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Точка</th>' : ''}
                                     <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Время</th>
                                     <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Часы</th>
                                     <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Касса</th>
@@ -731,7 +915,7 @@
                                 ${monthShifts.map(shift => `
                                     <tr class="hover:bg-gray-50">
                                         <td class="px-4 py-3 text-sm text-gray-700">${shift.date}</td>
-                                        <td class="px-4 py-3 text-sm text-gray-700">${userSettings.locations[shift.location]?.name || shift.location}</td>
+                                        ${!isIntern ? `<td class="px-4 py-3 text-sm text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
                                         <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
                                         <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
                                         <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
@@ -758,18 +942,21 @@
         }
 
         function render() {
-            if (!currentUser) {
+            if (!currentUser || !userProfile) {
                 renderAuth();
+            } else if (userProfile.role === 'manager') {
+                renderManagerView();
             } else if (showSettings) {
                 renderSettings();
             } else {
-                renderMain();
+                renderBaristaView();
             }
         }
 
         onAuthStateChanged(auth, async (user) => {
             currentUser = user;
             if (user) {
+                await loadUserProfile();
                 await loadUserSettings();
                 await loadData();
             } else {
@@ -785,6 +972,7 @@
         window.addDeduction = addDeduction;
         window.deleteDeduction = deleteDeduction;
         window.changeMonth = changeMonth;
+        window.changeBarista = changeBarista;
         window.toggleSettings = toggleSettings;
         window.updateLocationSetting = updateLocationSetting;
         window.updateCashPercent = updateCashPercent;
