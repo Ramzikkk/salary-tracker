@@ -440,7 +440,18 @@
             }
         }
 
-        async function cleanInvalidShifts() {
+        async function editBaristaName(baristaId, currentName) {
+            const newName = prompt('Введите новое имя:', currentName);
+            if (!newName || newName === currentName) return;
+            
+            try {
+                await setDoc(doc(db, 'users', baristaId), { name: newName }, { merge: true });
+                alert('✅ Имя изменено!');
+                await loadData();
+            } catch (error) {
+                alert('Ошибка: ' + error.message);
+            }
+        }
             if (!confirm('Удалить смены с невалидными userId? Это необратимо!')) return;
             
             try {
@@ -647,10 +658,17 @@
                             Все бариста
                         </button>
                         ${allBaristas.map(barista => `
-                            <button onclick="window.changeBarista('${barista.id}')" 
-                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
-                                ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
-                            </button>
+                            <div class="flex gap-1">
+                                <button onclick="window.changeBarista('${barista.id}')" 
+                                    class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                    ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
+                                </button>
+                                <button onclick="window.editBaristaName('${barista.id}', '${barista.name}')"
+                                    class="px-2 py-2 rounded-lg bg-gray-100 hover:bg-gray-300 text-gray-600 transition"
+                                    title="Изменить имя">
+                                    ✏️
+                                </button>
+                            </div>
                         `).join('')}
                     </div>
                 </div>
@@ -1135,6 +1153,7 @@
         window.changeBarista = changeBarista;
         window.migrateOldUsers = migrateOldUsers;
         window.cleanInvalidShifts = cleanInvalidShifts;
+        window.editBaristaName = editBaristaName;
         window.toggleSettings = toggleSettings;
         window.updateLocationSetting = updateLocationSetting;
         window.updateCashPercent = updateCashPercent;
