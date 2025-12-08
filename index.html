@@ -14,8 +14,7 @@
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, setDoc, getDoc, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        // 🔐 НАСТРОЙКА БЕЗОПАСНОСТИ - УКАЖИ СВОЙ EMAIL НАЧАЛЬНИКА ЗДЕСЬ!
-        const MANAGER_EMAIL = "gcsalary@gmail.com"; // ← ИЗМЕНИ НА СВОЙ EMAIL!
+        const MANAGER_EMAIL = "gcsalary@gmail.com";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBxCYvHpwC37-NuQ_-iNhNpiApS7_qfQps",
@@ -47,7 +46,6 @@
             }
         };
 
-        // === AUTH FUNCTIONS ===
         async function register() {
             const email = document.getElementById('auth-email').value;
             const password = document.getElementById('auth-password').value;
@@ -60,9 +58,7 @@
             }
         
             try {
-                // 🔐 АВТОМАТИЧЕСКОЕ назначение роли
                 const actualRole = email.toLowerCase() === MANAGER_EMAIL.toLowerCase() ? 'manager' : role;
-                
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
         
@@ -74,7 +70,6 @@
                 });
         
                 await setDoc(doc(db, 'userSettings', user.uid), userSettings);
-        
                 alert('✅ Регистрация успешна!');
             } catch (error) {
                 alert('Ошибка: ' + error.message);
@@ -121,18 +116,27 @@
             }
         }
 
+        // 🔧 ИСПРАВЛЕНИЕ: Автоматическая миграция для старых аккаунтов
         async function loadUserSettings() {
             if (!currentUser) return;
             
-            const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
-            if (settingsDoc.exists()) {
-                userSettings = settingsDoc.data();
-            } else {
-                await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
+            try {
+                const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
+                
+                if (settingsDoc.exists()) {
+                    userSettings = settingsDoc.data();
+                } else {
+                    // ✨ Создаем настройки для старых аккаунтов автоматически
+                    console.log('🔧 Создаем настройки для старого аккаунта...');
+                    await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
+                    console.log('✅ Настройки успешно созданы!');
+                }
+            } catch (error) {
+                console.error('Ошибка загрузки настроек:', error);
+                alert('⚠️ Не удалось загрузить настройки. Используются стандартные значения.');
             }
         }
 
-        // === DATA FUNCTIONS ===
         async function loadData() {
             if (!currentUser) return;
 
@@ -301,7 +305,6 @@
             return (endMinutes - startMinutes) / 60;
         }
 
-        // === SETTINGS FUNCTIONS ===
         function toggleSettings() {
             showSettings = !showSettings;
             render();
@@ -326,7 +329,6 @@
             }
         }
 
-        // === FILTER & STATS FUNCTIONS ===
         function changeMonth(month) {
             selectedMonth = month;
             render();
@@ -412,220 +414,9 @@
             };
         }
 
-        // === RENDER FUNCTIONS ===
         function renderAuth() {
             document.getElementById('app').innerHTML = `
                 <div class="max-w-md mx-auto">
-                    <div class="bg-white rounded-2xl shadow-2xl p-8">
-                        <div class="text-center mb-8">
-                            <h1 class="text-4xl font-bold text-gray-800 mb-2">💰 Калькулятор</h1>
-                            <p class="text-gray-600">Зарплаты барист</p>
-                        </div>
-
-                        <div class="space-y-4 mb-6">
-                            <input type="email" id="auth-email" placeholder="Email" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                            <input type="password" id="auth-password" placeholder="Пароль" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                            <input type="text" id="auth-name" placeholder="Ваше имя" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                            <select id="auth-role" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                                <option value="barista">☕ Бариста</option>
-                                <option value="intern">👨‍🎓 Стажёр</option>
-                            </select>
-                        </div>
-
-                        <div class="bg-green-50 border border-green-200 p-3 rounded-lg mb-4">
-                            <p class="text-xs text-green-800">
-                                🔐 <strong>Безопасность:</strong> Роль начальника назначается автоматически для зарегистрированного email
-                            </p>
-                        </div>
-
-                        <div class="space-y-3">
-                            <button onclick="window.login()" 
-                                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition">
-                                🔑 Войти
-                            </button>
-                            <button onclick="window.register()" 
-                                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition">
-                                ➕ Регистрация
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderManagerView() {
-            const baristaShifts = selectedBaristaId === 'all' 
-                ? shifts 
-                : filterShiftsByBarista(shifts, selectedBaristaId);
-
-            const baristaDeductions = selectedBaristaId === 'all'
-                ? deductions
-                : deductions.filter(d => d.userId === selectedBaristaId);
-
-            const availableMonths = getAvailableMonths(baristaShifts);
-            const monthShifts = filterShiftsByMonth(baristaShifts, selectedMonth);
-            const monthDeductions = filterDeductionsByMonth(baristaDeductions, selectedMonth);
-
-            const groupedByBarista = {};
-            monthShifts.forEach(shift => {
-                if (!groupedByBarista[shift.userId]) {
-                    groupedByBarista[shift.userId] = {
-                        name: shift.userName,
-                        role: shift.userRole,
-                        shifts: [],
-                        deductions: []
-                    };
-                }
-                groupedByBarista[shift.userId].shifts.push(shift);
-            });
-
-            monthDeductions.forEach(deduction => {
-                if (groupedByBarista[deduction.userId]) {
-                    groupedByBarista[deduction.userId].deductions.push(deduction);
-                }
-            });
-
-            document.getElementById('app').innerHTML = `
-                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
-                    <div class="flex justify-between items-center flex-wrap gap-4">
-                        <div>
-                            <h1 class="text-3xl font-bold text-gray-800 mb-2">👔 Панель начальника</h1>
-                            <p class="text-gray-600">${userProfile.name} (${currentUser.email})</p>
-                        </div>
-                        <button onclick="window.logout()" 
-                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
-                            🚪 Выход
-                        </button>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-                    <h2 class="text-xl font-bold text-gray-800 mb-4">👥 Выберите бариста</h2>
-                    <div class="flex flex-wrap gap-2">
-                        <button onclick="window.changeBarista('all')" 
-                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
-                            Все бариста
-                        </button>
-                        ${allBaristas.map(barista => `
-                            <button onclick="window.changeBarista('${barista.id}')" 
-                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
-                                ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
-                            </button>
-                        `).join('')}
-                    </div>
-                </div>
-
-                ${availableMonths.length > 0 ? `
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-                    <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Выберите период</h2>
-                    <div class="flex flex-wrap gap-2">
-                        <button onclick="window.changeMonth('all')" 
-                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
-                            Все время
-                        </button>
-                        ${availableMonths.map(month => `
-                            <button onclick="window.changeMonth('${month}')" 
-                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === month ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
-                                ${getMonthName(month)}
-                            </button>
-                        `).join('')}
-                    </div>
-                </div>
-                ` : ''}
-
-                <div class="space-y-6">
-                    ${Object.entries(groupedByBarista).map(([userId, data]) => {
-                        const totals = getTotals(data.shifts, data.deductions);
-                        const isIntern = data.role === 'intern';
-                        const roleLabel = isIntern ? '👨‍🎓 Стажёр' : '☕ Бариста';
-
-                        return `
-                            <div class="bg-white rounded-xl shadow-lg p-6">
-                                <h2 class="text-2xl font-bold text-gray-800 mb-4">${roleLabel}: ${data.name}</h2>
-                                
-                                <div class="grid md:grid-cols-4 gap-4 mb-6">
-                                    <div class="bg-blue-50 rounded-lg p-4">
-                                        <div class="text-sm text-blue-600 mb-1">Смен</div>
-                                        <div class="text-2xl font-bold text-blue-900">${totals.totalShifts}</div>
-                                    </div>
-                                    <div class="bg-purple-50 rounded-lg p-4">
-                                        <div class="text-sm text-purple-600 mb-1">Часов</div>
-                                        <div class="text-2xl font-bold text-purple-900">${totals.totalHours.toFixed(1)}ч</div>
-                                    </div>
-                                    <div class="bg-green-50 rounded-lg p-4">
-                                        <div class="text-sm text-green-600 mb-1">Заработано</div>
-                                        <div class="text-2xl font-bold text-green-900">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
-                                    </div>
-                                    <div class="bg-indigo-50 rounded-lg p-4">
-                                        <div class="text-sm text-indigo-600 mb-1">К выплате</div>
-                                        <div class="text-2xl font-bold text-indigo-900">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
-                                    </div>
-                                </div>
-
-                                ${data.shifts.length > 0 ? `
-                                <div class="overflow-x-auto">
-                                    <table class="w-full text-sm">
-                                        <thead class="bg-gray-50">
-                                            <tr>
-                                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Дата</th>
-                                                ${!isIntern ? '<th class="px-3 py-2 text-left font-semibold text-gray-700">Точка</th>' : ''}
-                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Время</th>
-                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Часы</th>
-                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Касса</th>
-                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">ЗП</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody class="divide-y divide-gray-200">
-                                            ${data.shifts.map(shift => `
-                                                <tr class="hover:bg-gray-50">
-                                                    <td class="px-3 py-2 text-gray-700">${shift.date}</td>
-                                                    ${!isIntern ? `<td class="px-3 py-2 text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
-                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
-                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
-                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
-                                                    <td class="px-3 py-2 text-right font-semibold text-green-600">${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸</td>
-                                                </tr>
-                                            `).join('')}
-                                        </tbody>
-                                    </table>
-                                </div>
-                                ` : '<p class="text-gray-500 text-center py-4">Нет смен за выбранный период</p>'}
-
-                                ${data.deductions.length > 0 ? `
-                                <div class="mt-4">
-                                    <h3 class="font-bold text-gray-800 mb-2">💸 Вычеты:</h3>
-                                    <div class="space-y-1">
-                                        ${data.deductions.map(d => `
-                                            <div class="flex justify-between bg-red-50 px-3 py-2 rounded">
-                                                <span class="text-gray-700">${d.name}</span>
-                                                <span class="text-red-600 font-semibold">-${d.amount.toLocaleString()}₸</span>
-                                            </div>
-                                        `).join('')}
-                                    </div>
-                                </div>
-                                ` : ''}
-                            </div>
-                        `;
-                    }).join('')}
-                </div>
-            `;
-        }
-
-        function renderSettings() {
-            document.getElementById('app').innerHTML = `
-                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
-                    <div class="flex justify-between items-center mb-6">
-                        <h1 class="text-3xl font-bold text-gray-800">⚙️ Настройки</h1>
-                        <button onclick="window.toggleSettings()" 
-                            class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition">
-                            ← Назад
-                        </button>
-                    </div>
-
                     <div class="space-y-6">
                         <div class="bg-gray-50 p-6 rounded-xl">
                             <h2 class="text-xl font-bold text-gray-800 mb-4">💵 Процент с кассы</h2>
@@ -992,4 +783,214 @@
         render();
     </script>
 </body>
-</html>
+</html>bg-white rounded-2xl shadow-2xl p-8">
+                        <div class="text-center mb-8">
+                            <h1 class="text-4xl font-bold text-gray-800 mb-2">💰 Калькулятор</h1>
+                            <p class="text-gray-600">Зарплаты барист</p>
+                        </div>
+
+                        <div class="space-y-4 mb-6">
+                            <input type="email" id="auth-email" placeholder="Email" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            <input type="password" id="auth-password" placeholder="Пароль" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            <input type="text" id="auth-name" placeholder="Ваше имя" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                            <select id="auth-role" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                                <option value="barista">☕ Бариста</option>
+                                <option value="intern">👨‍🎓 Стажёр</option>
+                            </select>
+                        </div>
+
+                        <div class="bg-green-50 border border-green-200 p-3 rounded-lg mb-4">
+                            <p class="text-xs text-green-800">
+                                🔐 <strong>Безопасность:</strong> Роль начальника назначается автоматически для зарегистрированного email
+                            </p>
+                        </div>
+
+                        <div class="space-y-3">
+                            <button onclick="window.login()" 
+                                class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition">
+                                🔑 Войти
+                            </button>
+                            <button onclick="window.register()" 
+                                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition">
+                                ➕ Регистрация
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderManagerView() {
+            const baristaShifts = selectedBaristaId === 'all' 
+                ? shifts 
+                : filterShiftsByBarista(shifts, selectedBaristaId);
+
+            const baristaDeductions = selectedBaristaId === 'all'
+                ? deductions
+                : deductions.filter(d => d.userId === selectedBaristaId);
+
+            const availableMonths = getAvailableMonths(baristaShifts);
+            const monthShifts = filterShiftsByMonth(baristaShifts, selectedMonth);
+            const monthDeductions = filterDeductionsByMonth(baristaDeductions, selectedMonth);
+
+            const groupedByBarista = {};
+            monthShifts.forEach(shift => {
+                if (!groupedByBarista[shift.userId]) {
+                    groupedByBarista[shift.userId] = {
+                        name: shift.userName,
+                        role: shift.userRole,
+                        shifts: [],
+                        deductions: []
+                    };
+                }
+                groupedByBarista[shift.userId].shifts.push(shift);
+            });
+
+            monthDeductions.forEach(deduction => {
+                if (groupedByBarista[deduction.userId]) {
+                    groupedByBarista[deduction.userId].deductions.push(deduction);
+                }
+            });
+
+            document.getElementById('app').innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                    <div class="flex justify-between items-center flex-wrap gap-4">
+                        <div>
+                            <h1 class="text-3xl font-bold text-gray-800 mb-2">👔 Панель начальника</h1>
+                            <p class="text-gray-600">${userProfile.name} (${currentUser.email})</p>
+                        </div>
+                        <button onclick="window.logout()" 
+                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
+                            🚪 Выход
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">👥 Выберите бариста</h2>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="window.changeBarista('all')" 
+                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                            Все бариста
+                        </button>
+                        ${allBaristas.map(barista => `
+                            <button onclick="window.changeBarista('${barista.id}')" 
+                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+
+                ${availableMonths.length > 0 ? `
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Выберите период</h2>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="window.changeMonth('all')" 
+                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                            Все время
+                        </button>
+                        ${availableMonths.map(month => `
+                            <button onclick="window.changeMonth('${month}')" 
+                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === month ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                ${getMonthName(month)}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="space-y-6">
+                    ${Object.entries(groupedByBarista).map(([userId, data]) => {
+                        const totals = getTotals(data.shifts, data.deductions);
+                        const isIntern = data.role === 'intern';
+                        const roleLabel = isIntern ? '👨‍🎓 Стажёр' : '☕ Бариста';
+
+                        return `
+                            <div class="bg-white rounded-xl shadow-lg p-6">
+                                <h2 class="text-2xl font-bold text-gray-800 mb-4">${roleLabel}: ${data.name}</h2>
+                                
+                                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                                    <div class="bg-blue-50 rounded-lg p-4">
+                                        <div class="text-sm text-blue-600 mb-1">Смен</div>
+                                        <div class="text-2xl font-bold text-blue-900">${totals.totalShifts}</div>
+                                    </div>
+                                    <div class="bg-purple-50 rounded-lg p-4">
+                                        <div class="text-sm text-purple-600 mb-1">Часов</div>
+                                        <div class="text-2xl font-bold text-purple-900">${totals.totalHours.toFixed(1)}ч</div>
+                                    </div>
+                                    <div class="bg-green-50 rounded-lg p-4">
+                                        <div class="text-sm text-green-600 mb-1">Заработано</div>
+                                        <div class="text-2xl font-bold text-green-900">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
+                                    </div>
+                                    <div class="bg-indigo-50 rounded-lg p-4">
+                                        <div class="text-sm text-indigo-600 mb-1">К выплате</div>
+                                        <div class="text-2xl font-bold text-indigo-900">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
+                                    </div>
+                                </div>
+
+                                ${data.shifts.length > 0 ? `
+                                <div class="overflow-x-auto">
+                                    <table class="w-full text-sm">
+                                        <thead class="bg-gray-50">
+                                            <tr>
+                                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Дата</th>
+                                                ${!isIntern ? '<th class="px-3 py-2 text-left font-semibold text-gray-700">Точка</th>' : ''}
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Время</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Часы</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">Касса</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">ЗП</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-gray-200">
+                                            ${data.shifts.map(shift => `
+                                                <tr class="hover:bg-gray-50">
+                                                    <td class="px-3 py-2 text-gray-700">${shift.date}</td>
+                                                    ${!isIntern ? `<td class="px-3 py-2 text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
+                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
+                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
+                                                    <td class="px-3 py-2 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
+                                                    <td class="px-3 py-2 text-right font-semibold text-green-600">${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                                ` : '<p class="text-gray-500 text-center py-4">Нет смен за выбранный период</p>'}
+
+                                ${data.deductions.length > 0 ? `
+                                <div class="mt-4">
+                                    <h3 class="font-bold text-gray-800 mb-2">💸 Вычеты:</h3>
+                                    <div class="space-y-1">
+                                        ${data.deductions.map(d => `
+                                            <div class="flex justify-between bg-red-50 px-3 py-2 rounded">
+                                                <span class="text-gray-700">${d.name}</span>
+                                                <span class="text-red-600 font-semibold">-${d.amount.toLocaleString()}₸</span>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                                ` : ''}
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        function renderSettings() {
+            document.getElementById('app').innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h1 class="text-3xl font-bold text-gray-800">⚙️ Настройки</h1>
+                        <button onclick="window.toggleSettings()" 
+                            class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition">
+                            ← Назад
+                        </button>
+                    </div>
+
+                    <div class="
