@@ -390,32 +390,37 @@
             if (!confirm('Создать профили для всех пользователей из старых смен?')) return;
             
             try {
-                const uniqueUserIds = [...new Set(shifts.map(s => s.userId))];
+                // Фильтруем только валидные userId
+                const uniqueUserIds = [...new Set(shifts.map(s => s.userId).filter(id => id && typeof id === 'string'))];
                 console.log('Найдено уникальных userId:', uniqueUserIds.length);
                 
                 let created = 0;
                 for (const userId of uniqueUserIds) {
-                    const userDoc = await getDoc(doc(db, 'users', userId));
-                    
-                    if (!userDoc.exists()) {
-                        // Пытаемся найти имя из смен
-                        const userShift = shifts.find(s => s.userId === userId);
-                        const userName = userShift?.userName || 'Пользователь';
+                    try {
+                        const userDoc = await getDoc(doc(db, 'users', userId));
                         
-                        // Создаём профиль
-                        await setDoc(doc(db, 'users', userId), {
-                            name: userName !== 'undefined' ? userName : 'Пользователь',
-                            email: `user_${userId.slice(0, 6)}@temp.com`,
-                            role: 'barista',
-                            createdAt: new Date().toISOString(),
-                            migrated: true
-                        });
-                        
-                        // Создаём настройки
-                        await setDoc(doc(db, 'userSettings', userId), userSettings);
-                        
-                        created++;
-                        console.log(`✅ Создан профиль для ${userName}`);
+                        if (!userDoc.exists()) {
+                            // Пытаемся найти имя из смен
+                            const userShift = shifts.find(s => s.userId === userId);
+                            const userName = userShift?.userName || 'Пользователь';
+                            
+                            // Создаём профиль
+                            await setDoc(doc(db, 'users', userId), {
+                                name: userName !== 'undefined' && userName ? userName : 'Пользователь',
+                                email: `user_${userId.slice(0, 6)}@temp.com`,
+                                role: 'barista',
+                                createdAt: new Date().toISOString(),
+                                migrated: true
+                            });
+                            
+                            // Создаём настройки
+                            await setDoc(doc(db, 'userSettings', userId), userSettings);
+                            
+                            created++;
+                            console.log(`✅ Создан профиль для ${userName}`);
+                        }
+                    } catch (error) {
+                        console.error(`❌ Ошибка для userId ${userId}:`, error);
                     }
                 }
                 
