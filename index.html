@@ -395,6 +395,8 @@
                 console.log('Найдено уникальных userId:', uniqueUserIds.length);
                 
                 let created = 0;
+                let failed = [];
+                
                 for (const userId of uniqueUserIds) {
                     try {
                         const userDoc = await getDoc(doc(db, 'users', userId));
@@ -421,13 +423,43 @@
                         }
                     } catch (error) {
                         console.error(`❌ Ошибка для userId ${userId}:`, error);
+                        failed.push(userId);
                     }
                 }
                 
-                alert(`✅ Миграция завершена! Создано профилей: ${created}`);
+                let message = `✅ Миграция завершена! Создано профилей: ${created}`;
+                if (failed.length > 0) {
+                    message += `\n⚠️ Не удалось создать: ${failed.length} (старые несуществующие аккаунты)`;
+                }
+                
+                alert(message);
                 await loadData();
             } catch (error) {
                 console.error('Ошибка миграции:', error);
+                alert('Ошибка: ' + error.message);
+            }
+        }
+
+        async function cleanInvalidShifts() {
+            if (!confirm('Удалить смены с невалидными userId? Это необратимо!')) return;
+            
+            try {
+                const allUsers = await getDocs(collection(db, 'users'));
+                const validUserIds = new Set(allUsers.docs.map(d => d.id));
+                
+                let deleted = 0;
+                for (const shift of shifts) {
+                    if (!shift.userId || !validUserIds.has(shift.userId)) {
+                        await deleteDoc(doc(db, 'shifts', shift.id));
+                        deleted++;
+                        console.log(`🗑️ Удалена смена ${shift.id} (userId: ${shift.userId})`);
+                    }
+                }
+                
+                alert(`🗑️ Удалено смен с невалидными userId: ${deleted}`);
+                await loadData();
+            } catch (error) {
+                console.error('Ошибка очистки:', error);
                 alert('Ошибка: ' + error.message);
             }
         }
@@ -594,6 +626,10 @@
                             <button onclick="window.migrateOldUsers()" 
                                 class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-semibold transition">
                                 🔧 Мигрировать старые аккаунты
+                            </button>
+                            <button onclick="window.cleanInvalidShifts()" 
+                                class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold transition">
+                                🗑️ Очистить невалидные смены
                             </button>
                             <button onclick="window.logout()" 
                                 class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
@@ -1098,6 +1134,7 @@
         window.changeMonth = changeMonth;
         window.changeBarista = changeBarista;
         window.migrateOldUsers = migrateOldUsers;
+        window.cleanInvalidShifts = cleanInvalidShifts;
         window.toggleSettings = toggleSettings;
         window.updateLocationSetting = updateLocationSetting;
         window.updateCashPercent = updateCashPercent;
