@@ -14,6 +14,9 @@
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, setDoc, getDoc, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
+        // 🔐 НАСТРОЙКА БЕЗОПАСНОСТИ - УКАЖИ СВОЙ EMAIL НАЧАЛЬНИКА ЗДЕСЬ!
+        const MANAGER_EMAIL = "manager@example.com"; // ← ИЗМЕНИ НА СВОЙ EMAIL!
+
         const firebaseConfig = {
             apiKey: "AIzaSyBxCYvHpwC37-NuQ_-iNhNpiApS7_qfQps",
             authDomain: "salary-tracker-b3e7f.firebaseapp.com",
@@ -57,13 +60,21 @@
             }
 
             try {
+                // 🔐 ПРОВЕРКА: только указанный email может быть начальником
+                const actualRole = email.toLowerCase() === MANAGER_EMAIL.toLowerCase() ? 'manager' : role;
+                
+                if (email.toLowerCase() === MANAGER_EMAIL.toLowerCase() && role !== 'manager') {
+                    alert('⚠️ Этот email зарезервирован для начальника!');
+                    return;
+                }
+
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
 
                 await setDoc(doc(db, 'users', user.uid), {
                     name: name,
                     email: email,
-                    role: role,
+                    role: actualRole,
                     createdAt: new Date().toISOString()
                 });
 
@@ -427,8 +438,13 @@
                                 class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                                 <option value="barista">☕ Бариста</option>
                                 <option value="intern">👨‍🎓 Стажёр</option>
-                                <option value="manager">👔 Начальник</option>
                             </select>
+                        </div>
+
+                        <div class="bg-green-50 border border-green-200 p-3 rounded-lg mb-4">
+                            <p class="text-xs text-green-800">
+                                🔐 <strong>Безопасность:</strong> Роль начальника назначается автоматически для зарегистрированного email
+                            </p>
                         </div>
 
                         <div class="space-y-3">
