@@ -16,7 +16,6 @@
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getFirestore, collection, addDoc, deleteDoc, doc, getDocs, query, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        // Firebase конфигурация
         const firebaseConfig = {
             apiKey: "AIzaSyBxCYvHpwC37-NuQ_-iNhNpiApS7_qfQps",
             authDomain: "salary-tracker-b3e7f.firebaseapp.com",
@@ -35,8 +34,12 @@
             sary_arka: { name: 'Сары Арка', fullHours: 18, fullSalary: 13000 }
         };
 
+        const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 
+                           'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+
         let shifts = [];
         let deductions = [];
+        let selectedMonth = 'all';
 
         function calculateHours(startTime, endTime) {
             const [startHour, startMin] = startTime.split(':').map(Number);
@@ -45,7 +48,6 @@
             let hours = endHour - startHour;
             let minutes = endMin - startMin;
             
-            // Если конец раньше начала, значит смена через полночь
             if (hours < 0 || (hours === 0 && minutes < 0)) {
                 hours += 24;
             }
@@ -61,6 +63,40 @@
 
         function calculateCashBonus(cash) {
             return cash * 0.03;
+        }
+
+        function getMonthKey(date) {
+            const d = new Date(date);
+            return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+        }
+
+        function getMonthName(monthKey) {
+            if (monthKey === 'all') return 'Все время';
+            const [year, month] = monthKey.split('-');
+            return `${monthNames[parseInt(month) - 1]} ${year}`;
+        }
+
+        function getAvailableMonths() {
+            const months = new Set();
+            shifts.forEach(shift => {
+                months.add(getMonthKey(shift.date));
+            });
+            return Array.from(months).sort().reverse();
+        }
+
+        function filterShiftsByMonth(month) {
+            if (month === 'all') return shifts;
+            return shifts.filter(shift => getMonthKey(shift.date) === month);
+        }
+
+        function filterDeductionsByMonth(month) {
+            if (month === 'all') return deductions;
+            
+            const [year, monthNum] = month.split('-');
+            return deductions.filter(d => {
+                if (!d.month) return false;
+                return d.month === month;
+            });
         }
 
         async function loadData() {
@@ -138,13 +174,14 @@
         async function addDeduction() {
             const name = document.getElementById('deduction-name').value;
             const amount = parseFloat(document.getElementById('deduction-amount').value);
+            const month = selectedMonth === 'all' ? getMonthKey(new Date().toISOString().split('T')[0]) : selectedMonth;
 
             if (!name || !amount) {
                 alert('Заполните название и сумму');
                 return;
             }
 
-            const deduction = { name, amount, timestamp: Date.now() };
+            const deduction = { name, amount, month, timestamp: Date.now() };
 
             try {
                 const docRef = await addDoc(collection(db, 'deductions'), deduction);
@@ -171,7 +208,12 @@
             }
         }
 
-        function getStatsByLocation() {
+        function changeMonth(month) {
+            selectedMonth = month;
+            render();
+        }
+
+        function getStatsByLocation(monthShifts) {
             const stats = {};
             
             Object.keys(locations).forEach(key => {
@@ -186,7 +228,7 @@
                 };
             });
 
-            shifts.forEach(shift => {
+            monthShifts.forEach(shift => {
                 stats[shift.location].shifts++;
                 stats[shift.location].hours += shift.hours;
                 stats[shift.location].cash += shift.cash;
@@ -198,13 +240,13 @@
             return stats;
         }
 
-        function getTotals() {
-            const totalShifts = shifts.length;
-            const totalHours = shifts.reduce((sum, s) => sum + s.hours, 0);
-            const totalCash = shifts.reduce((sum, s) => sum + s.cash, 0);
-            const totalHourlySalary = shifts.reduce((sum, s) => sum + s.hourlySalary, 0);
-            const totalCashBonus = shifts.reduce((sum, s) => sum + s.cashBonus, 0);
-            const totalDeductions = deductions.reduce((sum, d) => sum + d.amount, 0);
+        function getTotals(monthShifts, monthDeductions) {
+            const totalShifts = monthShifts.length;
+            const totalHours = monthShifts.reduce((sum, s) => sum + s.hours, 0);
+            const totalCash = monthShifts.reduce((sum, s) => sum + s.cash, 0);
+            const totalHourlySalary = monthShifts.reduce((sum, s) => sum + s.hourlySalary, 0);
+            const totalCashBonus = monthShifts.reduce((sum, s) => sum + s.cashBonus, 0);
+            const totalDeductions = monthDeductions.reduce((sum, d) => sum + d.amount, 0);
             const grossTotal = totalHourlySalary + totalCashBonus;
             const netTotal = grossTotal - totalDeductions;
 
@@ -221,8 +263,11 @@
         }
 
         function render() {
-            const stats = getStatsByLocation();
-            const totals = getTotals();
+            const availableMonths = getAvailableMonths();
+            const monthShifts = filterShiftsByMonth(selectedMonth);
+            const monthDeductions = filterDeductionsByMonth(selectedMonth);
+            const stats = getStatsByLocation(monthShifts);
+            const totals = getTotals(monthShifts, monthDeductions);
             const today = new Date().toISOString().split('T')[0];
 
             document.getElementById('app').innerHTML = `
@@ -231,6 +276,62 @@
                         💰 Калькулятор зарплаты
                     </h1>
                     <p class="text-gray-600">Синхронизация через Firebase - доступно на всех устройствах</p>
+                </div>
+
+                ${availableMonths.length > 0 ? `
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Выберите период</h2>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="window.changeMonth('all')" 
+                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                            Все время
+                        </button>
+                        ${availableMonths.map(month => `
+                            <button onclick="window.changeMonth('${month}')" 
+                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedMonth === month ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                ${getMonthName(month)}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white mb-6">
+                    <h2 class="text-2xl font-bold mb-4">📊 ${getMonthName(selectedMonth)}</h2>
+                    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Смен</div>
+                            <div class="text-3xl font-bold">${totals.totalShifts}</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Часов</div>
+                            <div class="text-3xl font-bold">${totals.totalHours.toFixed(1)}ч</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Касса</div>
+                            <div class="text-2xl font-bold">${totals.totalCash.toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">ЗП с оклада</div>
+                            <div class="text-2xl font-bold">${totals.totalHourlySalary.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">ЗП с кассы (3%)</div>
+                            <div class="text-2xl font-bold">${totals.totalCashBonus.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Заработано</div>
+                            <div class="text-2xl font-bold">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
+                            <div class="text-sm opacity-90 mb-1">Вычеты</div>
+                            <div class="text-2xl font-bold text-red-300">-${totals.totalDeductions.toLocaleString()}₸</div>
+                        </div>
+                        <div class="bg-white bg-opacity-30 rounded-lg p-4 border-2 border-white">
+                            <div class="text-sm opacity-90 mb-1">К ПОЛУЧЕНИЮ</div>
+                            <div class="text-3xl font-bold">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="grid md:grid-cols-2 gap-6 mb-6">
@@ -281,7 +382,7 @@
                     </div>
 
                     <div class="bg-white rounded-xl shadow-lg p-6">
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">💸 Вычеты</h2>
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">💸 Вычеты ${selectedMonth !== 'all' ? '(' + getMonthName(selectedMonth) + ')' : ''}</h2>
                         
                         <div class="space-y-4 mb-4">
                             <input type="text" id="deduction-name" placeholder="Название (аванс, штраф)" 
@@ -295,7 +396,7 @@
                         </div>
 
                         <div class="space-y-2 max-h-64 overflow-y-auto">
-                            ${deductions.map(d => `
+                            ${monthDeductions.map(d => `
                                 <div class="flex justify-between items-center bg-red-50 p-3 rounded-lg">
                                     <div>
                                         <div class="font-semibold text-gray-800">${d.name}</div>
@@ -306,51 +407,6 @@
                                 </div>
                             `).join('')}
                         </div>
-                    </div>
-                </div>
-
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-                    <h2 class="text-xl font-bold text-gray-800 mb-4">📋 История смен</h2>
-                    <div class="overflow-x-auto">
-                        <table class="w-full">
-                            <thead class="bg-gray-50">
-                                <tr>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Дата</th>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Точка</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Время</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Часы</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Касса</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (оклад)</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (касса)</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Итого</th>
-                                    <th class="px-4 py-3"></th>
-                                </tr>
-                            </thead>
-                            <tbody class="divide-y divide-gray-200">
-                                ${shifts.map(shift => `
-                                    <tr class="hover:bg-gray-50">
-                                        <td class="px-4 py-3 text-sm text-gray-700">${shift.date}</td>
-                                        <td class="px-4 py-3 text-sm text-gray-700">${locations[shift.location].name}</td>
-                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
-                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
-                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
-                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
-                                            ${shift.hourlySalary.toFixed(0).toLocaleString()}₸
-                                        </td>
-                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
-                                            ${shift.cashBonus.toFixed(0).toLocaleString()}₸
-                                        </td>
-                                        <td class="px-4 py-3 text-sm text-right text-indigo-600 font-bold">
-                                            ${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸
-                                        </td>
-                                        <td class="px-4 py-3">
-                                            <button onclick="window.deleteShift('${shift.id}')" 
-                                                class="text-red-600 hover:text-red-800 text-xl">🗑️</button>
-                                        </td>
-                                    </tr>
-                                `).join('')}
-                            </tbody>
-                        </table>
                     </div>
                 </div>
 
@@ -388,41 +444,48 @@
                     `).join('')}
                 </div>
 
-                <div class="bg-gradient-to-r from-indigo-600 to-purple-600 rounded-xl shadow-lg p-6 text-white">
-                    <h2 class="text-2xl font-bold mb-6">📊 Общая статистика</h2>
-                    <div class="grid md:grid-cols-2 lg:grid-cols-4 gap-4">
-                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
-                            <div class="text-sm opacity-90 mb-1">Всего смен</div>
-                            <div class="text-3xl font-bold">${totals.totalShifts}</div>
-                        </div>
-                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
-                            <div class="text-sm opacity-90 mb-1">Всего часов</div>
-                            <div class="text-3xl font-bold">${totals.totalHours.toFixed(1)}ч</div>
-                        </div>
-                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
-                            <div class="text-sm opacity-90 mb-1">Общая касса</div>
-                            <div class="text-2xl font-bold">${totals.totalCash.toLocaleString()}₸</div>
-                        </div>
-                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
-                            <div class="text-sm opacity-90 mb-1">ЗП с оклада</div>
-                            <div class="text-2xl font-bold">${totals.totalHourlySalary.toFixed(0).toLocaleString()}₸</div>
-                        </div>
-                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
-                            <div class="text-sm opacity-90 mb-1">ЗП с кассы (3%)</div>
-                            <div class="text-2xl font-bold">${totals.totalCashBonus.toFixed(0).toLocaleString()}₸</div>
-                        </div>
-                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
-                            <div class="text-sm opacity-90 mb-1">Всего заработано</div>
-                            <div class="text-2xl font-bold">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
-                        </div>
-                        <div class="bg-white bg-opacity-20 rounded-lg p-4">
-                            <div class="text-sm opacity-90 mb-1">Вычеты</div>
-                            <div class="text-2xl font-bold text-red-300">-${totals.totalDeductions.toLocaleString()}₸</div>
-                        </div>
-                        <div class="bg-white bg-opacity-30 rounded-lg p-4 border-2 border-white">
-                            <div class="text-sm opacity-90 mb-1">ИТОГО К ПОЛУЧЕНИЮ</div>
-                            <div class="text-3xl font-bold">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
-                        </div>
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📋 История смен</h2>
+                    <div class="overflow-x-auto">
+                        <table class="w-full">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Дата</th>
+                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Точка</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Время</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Часы</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Касса</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (оклад)</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (касса)</th>
+                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Итого</th>
+                                    <th class="px-4 py-3"></th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-gray-200">
+                                ${monthShifts.map(shift => `
+                                    <tr class="hover:bg-gray-50">
+                                        <td class="px-4 py-3 text-sm text-gray-700">${shift.date}</td>
+                                        <td class="px-4 py-3 text-sm text-gray-700">${locations[shift.location].name}</td>
+                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
+                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
+                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
+                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
+                                            ${shift.hourlySalary.toFixed(0).toLocaleString()}₸
+                                        </td>
+                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
+                                            ${shift.cashBonus.toFixed(0).toLocaleString()}₸
+                                        </td>
+                                        <td class="px-4 py-3 text-sm text-right text-indigo-600 font-bold">
+                                            ${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <button onclick="window.deleteShift('${shift.id}')" 
+                                                class="text-red-600 hover:text-red-800 text-xl">🗑️</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             `;
@@ -432,6 +495,7 @@
         window.deleteShift = deleteShift;
         window.addDeduction = addDeduction;
         window.deleteDeduction = deleteDeduction;
+        window.changeMonth = changeMonth;
 
         loadData();
     </script>
