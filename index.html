@@ -14,7 +14,8 @@
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, setDoc, getDoc, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        const MANAGER_EMAIL = "gcsalary@gmail.com";
+        // 🔐 НАСТРОЙКА БЕЗОПАСНОСТИ - УКАЖИ СВОЙ EMAIL НАЧАЛЬНИКА ЗДЕСЬ!
+        const MANAGER_EMAIL = "gcsalary@gmail.com"; // ← ИЗМЕНИ НА СВОЙ EMAIL!
 
         const firebaseConfig = {
             apiKey: "AIzaSyBxCYvHpwC37-NuQ_-iNhNpiApS7_qfQps",
@@ -46,36 +47,34 @@
             }
         };
 
+        // === AUTH FUNCTIONS ===
         async function register() {
             const email = document.getElementById('auth-email').value;
             const password = document.getElementById('auth-password').value;
             const name = document.getElementById('auth-name').value;
             const role = document.getElementById('auth-role').value;
-
+        
             if (!email || !password || !name) {
                 alert('Заполните все поля!');
                 return;
             }
-
+        
             try {
+                // 🔐 АВТОМАТИЧЕСКОЕ назначение роли
                 const actualRole = email.toLowerCase() === MANAGER_EMAIL.toLowerCase() ? 'manager' : role;
                 
-                if (email.toLowerCase() === MANAGER_EMAIL.toLowerCase() && role !== 'manager') {
-                    alert('⚠️ Этот email зарезервирован для начальника!');
-                    return;
-                }
-
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
-
+        
                 await setDoc(doc(db, 'users', user.uid), {
                     name: name,
                     email: email,
                     role: actualRole,
                     createdAt: new Date().toISOString()
                 });
-
+        
                 await setDoc(doc(db, 'userSettings', user.uid), userSettings);
+        
                 alert('✅ Регистрация успешна!');
             } catch (error) {
                 alert('Ошибка: ' + error.message);
@@ -114,78 +113,39 @@
         }
 
         async function loadUserProfile() {
-            if (!currentUser) {
-                console.error('loadUserProfile: currentUser не определен');
-                return;
-            }
+            if (!currentUser) return;
             
-            console.log('🔍 Загрузка профиля для UID:', currentUser.uid);
-            
-            try {
-                const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
-                
-                if (userDoc.exists()) {
-                    userProfile = { id: currentUser.uid, ...userDoc.data() };
-                    console.log('✅ Профиль загружен:', userProfile);
-                } else {
-                    console.log('🔧 Создаём профиль для старого аккаунта...');
-                    
-                    const newProfile = {
-                        name: currentUser.email.split('@')[0],
-                        email: currentUser.email,
-                        role: currentUser.email.toLowerCase() === MANAGER_EMAIL.toLowerCase() ? 'manager' : 'barista',
-                        createdAt: new Date().toISOString()
-                    };
-                    
-                    await setDoc(doc(db, 'users', currentUser.uid), newProfile);
-                    userProfile = { id: currentUser.uid, ...newProfile };
-                    console.log('✅ Новый профиль создан:', userProfile);
-                }
-            } catch (error) {
-                console.error('❌ Ошибка в loadUserProfile:', error);
-                throw error;
+            const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
+            if (userDoc.exists()) {
+                userProfile = { id: currentUser.uid, ...userDoc.data() };
             }
         }
 
         async function loadUserSettings() {
             if (!currentUser) return;
             
-            try {
-                const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
-                
-                if (settingsDoc.exists()) {
-                    userSettings = settingsDoc.data();
-                    console.log('✅ Настройки загружены');
-                } else {
-                    console.log('🔧 Создаем настройки для старого аккаунта...');
-                    await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
-                    console.log('✅ Настройки успешно созданы!');
-                }
-            } catch (error) {
-                console.error('Ошибка загрузки настроек:', error);
+            const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
+            if (settingsDoc.exists()) {
+                userSettings = settingsDoc.data();
+            } else {
+                await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
             }
         }
 
+        // === DATA FUNCTIONS ===
         async function loadData() {
-            if (!currentUser || !userProfile) {
-                console.error('Ошибка: пользователь или профиль не загружены');
-                return;
+            if (!currentUser) return;
+
+            if (userProfile.role === 'manager') {
+                await loadAllBaristas();
+                await loadAllShifts();
+                await loadAllDeductions();
+            } else {
+                await loadMyShifts();
+                await loadMyDeductions();
             }
 
-            try {
-                if (userProfile.role === 'manager') {
-                    await loadAllBaristas();
-                    await loadAllShifts(); // Теперь loadAllShifts использует allBaristas для исправления имён
-                    await loadAllDeductions();
-                } else {
-                    await loadMyShifts();
-                    await loadMyDeductions();
-                }
-
-                render();
-            } catch (error) {
-                console.error('Ошибка загрузки данных:', error);
-            }
+            render();
         }
 
         async function loadAllBaristas() {
@@ -198,17 +158,6 @@
             const q = query(collection(db, 'shifts'), orderBy('date', 'desc'));
             const snapshot = await getDocs(q);
             shifts = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            
-            // Исправляем имена для старых смен
-            for (let shift of shifts) {
-                if (!shift.userName || shift.userName === 'undefined') {
-                    const user = allBaristas.find(b => b.id === shift.userId);
-                    if (user) {
-                        shift.userName = user.name;
-                        shift.userRole = user.role;
-                    }
-                }
-            }
         }
 
         async function loadAllDeductions() {
@@ -352,6 +301,7 @@
             return (endMinutes - startMinutes) / 60;
         }
 
+        // === SETTINGS FUNCTIONS ===
         function toggleSettings() {
             showSettings = !showSettings;
             render();
@@ -376,6 +326,7 @@
             }
         }
 
+        // === FILTER & STATS FUNCTIONS ===
         function changeMonth(month) {
             selectedMonth = month;
             render();
@@ -384,119 +335,6 @@
         function changeBarista(baristaId) {
             selectedBaristaId = baristaId;
             render();
-        }
-
-        async function migrateOldUsers() {
-            if (!confirm('Создать профили для всех пользователей из старых смен?')) return;
-            
-            try {
-                // Фильтруем только валидные userId
-                const uniqueUserIds = [...new Set(shifts.map(s => s.userId).filter(id => id && typeof id === 'string'))];
-                console.log('Найдено уникальных userId:', uniqueUserIds.length);
-                
-                let created = 0;
-                let failed = [];
-                
-                for (const userId of uniqueUserIds) {
-                    try {
-                        const userDoc = await getDoc(doc(db, 'users', userId));
-                        
-                        if (!userDoc.exists()) {
-                            // Пытаемся найти имя из смен
-                            const userShift = shifts.find(s => s.userId === userId);
-                            const userName = userShift?.userName || 'Пользователь';
-                            
-                            // Создаём профиль
-                            await setDoc(doc(db, 'users', userId), {
-                                name: userName !== 'undefined' && userName ? userName : 'Пользователь',
-                                email: `user_${userId.slice(0, 6)}@temp.com`,
-                                role: 'barista',
-                                createdAt: new Date().toISOString(),
-                                migrated: true
-                            });
-                            
-                            // Создаём настройки
-                            await setDoc(doc(db, 'userSettings', userId), userSettings);
-                            
-                            created++;
-                            console.log(`✅ Создан профиль для ${userName}`);
-                        }
-                    } catch (error) {
-                        console.error(`❌ Ошибка для userId ${userId}:`, error);
-                        failed.push(userId);
-                    }
-                }
-                
-                let message = `✅ Миграция завершена! Создано профилей: ${created}`;
-                if (failed.length > 0) {
-                    message += `\n⚠️ Не удалось создать: ${failed.length} (старые несуществующие аккаунты)`;
-                }
-                
-                alert(message);
-                await loadData();
-            } catch (error) {
-                console.error('Ошибка миграции:', error);
-                alert('Ошибка: ' + error.message);
-            }
-        }
-
-        async function editBaristaName(baristaId, currentName) {
-            const newName = prompt('Введите новое имя:', currentName);
-            if (!newName || newName === currentName) return;
-            
-            try {
-                await setDoc(doc(db, 'users', baristaId), { name: newName }, { merge: true });
-                alert('✅ Имя изменено!');
-                await loadData();
-            } catch (error) {
-                alert('Ошибка: ' + error.message);
-            }
-        }
-
-        async function cleanInvalidShifts() {
-            if (!confirm('Удалить смены с невалидными userId? Это необратимо!')) return;
-            
-            try {
-                const allUsers = await getDocs(collection(db, 'users'));
-                const validUserIds = new Set(allUsers.docs.map(d => d.id));
-                
-                let deleted = 0;
-                for (const shift of shifts) {
-                    if (!shift.userId || !validUserIds.has(shift.userId)) {
-                        await deleteDoc(doc(db, 'shifts', shift.id));
-                        deleted++;
-                        console.log(`🗑️ Удалена смена ${shift.id} (userId: ${shift.userId})`);
-                    }
-                }
-                
-                alert(`🗑️ Удалено смен с невалидными userId: ${deleted}`);
-                await loadData();
-            } catch (error) {
-                console.error('Ошибка очистки:', error);
-                alert('Ошибка: ' + error.message);
-            }
-        }
-            if (!confirm('Удалить смены с невалидными userId? Это необратимо!')) return;
-            
-            try {
-                const allUsers = await getDocs(collection(db, 'users'));
-                const validUserIds = new Set(allUsers.docs.map(d => d.id));
-                
-                let deleted = 0;
-                for (const shift of shifts) {
-                    if (!shift.userId || !validUserIds.has(shift.userId)) {
-                        await deleteDoc(doc(db, 'shifts', shift.id));
-                        deleted++;
-                        console.log(`🗑️ Удалена смена ${shift.id} (userId: ${shift.userId})`);
-                    }
-                }
-                
-                alert(`🗑️ Удалено смен с невалидными userId: ${deleted}`);
-                await loadData();
-            } catch (error) {
-                console.error('Ошибка очистки:', error);
-                alert('Ошибка: ' + error.message);
-            }
         }
 
         function getAvailableMonths(shiftsArray) {
@@ -574,13 +412,14 @@
             };
         }
 
+        // === RENDER FUNCTIONS ===
         function renderAuth() {
             document.getElementById('app').innerHTML = `
                 <div class="max-w-md mx-auto">
                     <div class="bg-white rounded-2xl shadow-2xl p-8">
                         <div class="text-center mb-8">
                             <h1 class="text-4xl font-bold text-gray-800 mb-2">💰 Калькулятор</h1>
-                            <p class="text-gray-600">Зарплаты бариста</p>
+                            <p class="text-gray-600">Зарплаты барист</p>
                         </div>
 
                         <div class="space-y-4 mb-6">
@@ -657,20 +496,10 @@
                             <h1 class="text-3xl font-bold text-gray-800 mb-2">👔 Панель начальника</h1>
                             <p class="text-gray-600">${userProfile.name} (${currentUser.email})</p>
                         </div>
-                        <div class="flex gap-2">
-                            <button onclick="window.migrateOldUsers()" 
-                                class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-semibold transition">
-                                🔧 Мигрировать старые аккаунты
-                            </button>
-                            <button onclick="window.cleanInvalidShifts()" 
-                                class="px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white rounded-lg font-semibold transition">
-                                🗑️ Очистить невалидные смены
-                            </button>
-                            <button onclick="window.logout()" 
-                                class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
-                                🚪 Выход
-                            </button>
-                        </div>
+                        <button onclick="window.logout()" 
+                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
+                            🚪 Выход
+                        </button>
                     </div>
                 </div>
 
@@ -682,17 +511,10 @@
                             Все бариста
                         </button>
                         ${allBaristas.map(barista => `
-                            <div class="flex gap-1">
-                                <button onclick="window.changeBarista('${barista.id}')" 
-                                    class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
-                                    ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
-                                </button>
-                                <button onclick="window.editBaristaName('${barista.id}', '${barista.name}')"
-                                    class="px-2 py-2 rounded-lg bg-gray-100 hover:bg-gray-300 text-gray-600 transition"
-                                    title="Изменить имя">
-                                    ✏️
-                                </button>
-                            </div>
+                            <button onclick="window.changeBarista('${barista.id}')" 
+                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
+                            </button>
                         `).join('')}
                     </div>
                 </div>
@@ -761,7 +583,7 @@
                                             ${data.shifts.map(shift => `
                                                 <tr class="hover:bg-gray-50">
                                                     <td class="px-3 py-2 text-gray-700">${shift.date}</td>
-                                                    ${!isIntern ? `<td class="px-3 py-2 text-gray-700">${userSettings.locations[shift.location]?.name || shift.location || 'Неизвестно'}</td>` : ''}
+                                                    ${!isIntern ? `<td class="px-3 py-2 text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
@@ -1104,7 +926,7 @@
                                 ${monthShifts.map(shift => `
                                     <tr class="hover:bg-gray-50">
                                         <td class="px-4 py-3 text-sm text-gray-700">${shift.date}</td>
-                                        ${!isIntern ? `<td class="px-4 py-3 text-sm text-gray-700">${userSettings.locations[shift.location]?.name || shift.location || 'Неизвестно'}</td>` : ''}
+                                        ${!isIntern ? `<td class="px-4 py-3 text-sm text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
                                         <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
                                         <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
                                         <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
@@ -1145,22 +967,9 @@
         onAuthStateChanged(auth, async (user) => {
             currentUser = user;
             if (user) {
-                try {
-                    await loadUserProfile();
-                    
-                    if (!userProfile) {
-                        console.error('Ошибка: профиль пользователя не загружен');
-                        alert('Ошибка загрузки профиля. Попробуйте войти снова.');
-                        await logout();
-                        return;
-                    }
-                    
-                    await loadUserSettings();
-                    await loadData();
-                } catch (error) {
-                    console.error('Ошибка при загрузке данных:', error);
-                    alert('Ошибка: ' + error.message);
-                }
+                await loadUserProfile();
+                await loadUserSettings();
+                await loadData();
             } else {
                 render();
             }
@@ -1175,9 +984,6 @@
         window.deleteDeduction = deleteDeduction;
         window.changeMonth = changeMonth;
         window.changeBarista = changeBarista;
-        window.migrateOldUsers = migrateOldUsers;
-        window.cleanInvalidShifts = cleanInvalidShifts;
-        window.editBaristaName = editBaristaName;
         window.toggleSettings = toggleSettings;
         window.updateLocationSetting = updateLocationSetting;
         window.updateCashPercent = updateCashPercent;
