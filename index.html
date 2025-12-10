@@ -38,6 +38,7 @@
         let allBaristas = [];
         let selectedMonth = 'all';
         let selectedBaristaId = 'all';
+        let selectedLocation = 'all';
         let showSettings = false;
 
         const LOCATIONS = {
@@ -57,6 +58,7 @@
 
         let editingBaristaId = null;
         let editingBaristaSettings = null;
+        let editingBaristaName = null;
 
         // === WINDOW FUNCTIONS ===
         window.register = register;
@@ -73,8 +75,10 @@
         window.saveUserSettings = saveUserSettings;
         window.changeMonth = changeMonth;
         window.changeBarista = changeBarista;
+        window.changeLocation = changeLocation;
         window.openBaristaSettings = openBaristaSettings;
         window.updateBaristaSettings = updateBaristaSettings;
+        window.updateBaristaName = updateBaristaName;
         window.saveBaristaSettings = saveBaristaSettings;
         window.closeBaristaSettings = closeBaristaSettings;
         window.updateTimeFromSlider = updateTimeFromSlider;
@@ -171,6 +175,14 @@
             const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
             if (settingsDoc.exists()) {
                 userSettings = settingsDoc.data();
+                // Ensure customSalaries exists
+                if (!userSettings.customSalaries) {
+                    userSettings.customSalaries = {
+                        boxpark: null,
+                        aport: null,
+                        saryarka: null
+                    };
+                }
             } else {
                 await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
             }
@@ -269,6 +281,16 @@
             }
 
             const location = LOCATIONS[locationKey];
+            
+            // Ensure customSalaries exists
+            if (!userSettings.customSalaries) {
+                userSettings.customSalaries = {
+                    boxpark: null,
+                    aport: null,
+                    saryarka: null
+                };
+            }
+            
             const customSalary = userSettings.customSalaries[locationKey];
             const baseSalary = customSalary !== null ? customSalary : location.fullSalary;
             const hourlyRate = baseSalary / location.fullHours;
@@ -431,6 +453,8 @@
 
         function openBaristaSettings(baristaId) {
             editingBaristaId = baristaId;
+            const barista = allBaristas.find(b => b.id === baristaId);
+            editingBaristaName = barista.name;
             loadBaristaSettings(baristaId);
         }
 
@@ -438,6 +462,14 @@
             const settingsDoc = await getDoc(doc(db, 'userSettings', baristaId));
             if (settingsDoc.exists()) {
                 editingBaristaSettings = settingsDoc.data();
+                // Ensure customSalaries exists
+                if (!editingBaristaSettings.customSalaries) {
+                    editingBaristaSettings.customSalaries = {
+                        boxpark: null,
+                        aport: null,
+                        saryarka: null
+                    };
+                }
             } else {
                 editingBaristaSettings = {
                     cashPercent: 3,
@@ -460,13 +492,25 @@
             }
         }
 
+        function updateBaristaName(newName) {
+            editingBaristaName = newName.trim();
+        }
+
         async function saveBaristaSettings() {
             if (!editingBaristaId) return;
             try {
                 await setDoc(doc(db, 'userSettings', editingBaristaId), editingBaristaSettings);
-                alert('✅ Настройки бариста сохранены!');
+                
+                if (editingBaristaName) {
+                    await setDoc(doc(db, 'users', editingBaristaId), {
+                        name: editingBaristaName
+                    }, { merge: true });
+                }
+                
+                alert('✅ Настройки и имя бариста сохранены!');
                 editingBaristaId = null;
                 editingBaristaSettings = null;
+                editingBaristaName = null;
                 await loadData();
             } catch (error) {
                 alert('❌ Ошибка: ' + error.message);
@@ -476,6 +520,7 @@
         function closeBaristaSettings() {
             editingBaristaId = null;
             editingBaristaSettings = null;
+            editingBaristaName = null;
             render();
         }
 
@@ -489,6 +534,11 @@
         // === FILTERS & STATS ===
         function changeMonth(month) {
             selectedMonth = month;
+            render();
+        }
+
+        function changeLocation(location) {
+            selectedLocation = location;
             render();
         }
 
@@ -653,14 +703,6 @@
                                 class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                         </div>
 
-                        <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-4">
-                            <p class="text-sm text-blue-800">
-                                <strong>ℹ️ Роли:</strong><br>
-                                • Email <strong>${MANAGER_EMAIL}</strong> → Менеджер<br>
-                                • Остальные email → Бариста
-                            </p>
-                        </div>
-
                         <div class="space-y-3">
                             <button onclick="window.login()" 
                                 class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-lg transition">
@@ -751,6 +793,16 @@
                             </div>
 
                             <div class="bg-gray-50 p-6 rounded-xl">
+                                <h2 class="text-xl font-bold text-gray-800 mb-4">👤 Имя бариста</h2>
+                                <input type="text" 
+                                    value="${barista.name}" 
+                                    onchange="window.updateBaristaName(this.value)"
+                                    placeholder="Введите имя"
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                <p class="text-sm text-gray-600 mt-2">Это имя будет отображаться во всех отчетах</p>
+                            </div>
+
+                            <div class="bg-gray-50 p-6 rounded-xl">
                                 <h2 class="text-xl font-bold text-gray-800 mb-4">💰 Индивидуальные оклады</h2>
                                 <p class="text-sm text-gray-600 mb-4">Оставьте поле пустым, чтобы использовать стандартный оклад</p>
                                 
@@ -816,11 +868,12 @@
 
             const availableMonths = getAvailableMonths(baristaShifts);
             const monthShifts = filterShiftsByMonth(baristaShifts, selectedMonth);
+            const locationShifts = selectedLocation === 'all' ? monthShifts : monthShifts.filter(s => s.locationKey === selectedLocation);
             const monthDeductions = filterDeductionsByMonth(baristaDeductions, selectedMonth);
             const monthBonuses = filterBonusesByMonth(baristaBonuses, selectedMonth);
 
             const groupedByBarista = {};
-            monthShifts.forEach(shift => {
+            locationShifts.forEach(shift => {
                 if (!groupedByBarista[shift.userId]) {
                     groupedByBarista[shift.userId] = {
                         name: shift.userName,
@@ -882,6 +935,22 @@
                 </div>
                 ` : '<div class="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6"><p class="text-yellow-800">Нет зарегистрированных баристов</p></div>'}
 
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📍 Выберите точку</h2>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="window.changeLocation('all')" 
+                            class="px-4 py-2 rounded-lg font-semibold transition ${selectedLocation === 'all' ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                            Все точки
+                        </button>
+                        ${Object.entries(LOCATIONS).map(([key, loc]) => `
+                            <button onclick="window.changeLocation('${key}')" 
+                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedLocation === key ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                📍 ${loc.name}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+
                 ${availableMonths.length > 0 ? `
                 <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Выберите период</h2>
@@ -932,6 +1001,15 @@
                                         <div class="text-2xl font-bold text-indigo-900">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
                                     </div>
                                 </div>
+
+                                ${data.shifts.length > 0 ? `
+                                <div class="mb-6">
+                                    <h3 class="text-lg font-bold text-gray-800 mb-3">📊 Диаграмма заработка по точкам</h3>
+                                    <div class="h-64">
+                                        <canvas id="chart-${userId}"></canvas>
+                                    </div>
+                                </div>
+                                ` : ''}
 
                                 <div class="overflow-x-auto">
                                     <table class="w-full text-sm">
@@ -995,6 +1073,15 @@
                 </div>
                 ` : '<div class="bg-gray-50 border border-gray-200 p-8 rounded-lg text-center"><p class="text-gray-600 text-lg">Нет данных за выбранный период</p></div>'}
             `;
+
+            // СОЗДАЁМ ГРАФИКИ ДЛЯ КАЖДОГО БАРИСТА
+            if (Object.keys(groupedByBarista).length > 0) {
+                Object.entries(groupedByBarista).forEach(([userId, data]) => {
+                    if (data.shifts.length > 0) {
+                        createChart(`chart-${userId}`, data.shifts);
+                    }
+                });
+            }
         }
 
         function renderBaristaView() {
@@ -1311,4 +1398,4 @@
         });
     </script>
 </body>
-</html> 
+</html>
