@@ -650,7 +650,17 @@
         async function saveBaristaSettings() {
             if (!editingBaristaId) return;
             try {
-                await setDoc(doc(db, 'userSettings', editingBaristaId), editingBaristaSettings);
+                // Убедимся что структура правильная
+                const settingsToSave = {
+                    cashPercent: editingBaristaSettings.cashPercent || 3,
+                    customSalaries: {
+                        boxpark: editingBaristaSettings.customSalaries?.boxpark || { weekday: null, weekend: null },
+                        aport: editingBaristaSettings.customSalaries?.aport || { weekday: null, weekend: null },
+                        saryarka: editingBaristaSettings.customSalaries?.saryarka || { weekday: null, weekend: null }
+                    }
+                };
+                
+                await setDoc(doc(db, 'userSettings', editingBaristaId), settingsToSave);
                 
                 if (editingBaristaName) {
                     await setDoc(doc(db, 'users', editingBaristaId), {
