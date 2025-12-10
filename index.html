@@ -1025,6 +1025,7 @@
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Часы</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Касса</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">ЗП</th>
+                                                <th class="px-3 py-2 text-center font-semibold text-gray-700">Действия</th>
                                             </tr>
                                         </thead>
                                         <tbody class="divide-y divide-gray-200">
@@ -1036,6 +1037,10 @@
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
                                                     <td class="px-3 py-2 text-right font-semibold text-green-600">${(shift.hourlySalary + shift.cashBonus + (shift.autoBonus || 0)).toFixed(0).toLocaleString()}₸</td>
+                                                    <td class="px-3 py-2 text-center">
+                                                        <button onclick="window.deleteShift('${shift.id}')" 
+                                                            class="text-red-600 hover:text-red-800 text-xl" title="Удалить смену">🗑️</button>
+                                                    </td>
                                                 </tr>
                                             `).join('')}
                                         </tbody>
@@ -1048,9 +1053,13 @@
                                         <h3 class="font-bold text-gray-800 mb-2">🎁 Премии:</h3>
                                         <div class="space-y-1">
                                             ${data.bonuses.map(b => `
-                                                <div class="flex justify-between bg-green-50 px-3 py-2 rounded">
-                                                    <span class="text-gray-700">${b.name}</span>
-                                                    <span class="text-green-600 font-semibold">+${b.amount.toLocaleString()}₸</span>
+                                                <div class="flex justify-between items-center bg-green-50 px-3 py-2 rounded">
+                                                    <div>
+                                                        <span class="text-gray-700">${b.name}</span>
+                                                        <span class="text-green-600 font-semibold ml-2">+${b.amount.toLocaleString()}₸</span>
+                                                    </div>
+                                                    <button onclick="window.deleteBonus('${b.id}')" 
+                                                        class="text-red-600 hover:text-red-800 text-lg" title="Удалить премию">🗑️</button>
                                                 </div>
                                             `).join('')}
                                         </div>
@@ -1062,9 +1071,13 @@
                                         <h3 class="font-bold text-gray-800 mb-2">💸 Вычеты:</h3>
                                         <div class="space-y-1">
                                             ${data.deductions.map(d => `
-                                                <div class="flex justify-between bg-red-50 px-3 py-2 rounded">
-                                                    <span class="text-gray-700">${d.name}</span>
-                                                    <span class="text-red-600 font-semibold">-${d.amount.toLocaleString()}₸</span>
+                                                <div class="flex justify-between items-center bg-red-50 px-3 py-2 rounded">
+                                                    <div>
+                                                        <span class="text-gray-700">${d.name}</span>
+                                                        <span class="text-red-600 font-semibold ml-2">-${d.amount.toLocaleString()}₸</span>
+                                                    </div>
+                                                    <button onclick="window.deleteDeduction('${d.id}')" 
+                                                        class="text-red-600 hover:text-red-800 text-lg" title="Удалить вычет">🗑️</button>
                                                 </div>
                                             `).join('')}
                                         </div>
