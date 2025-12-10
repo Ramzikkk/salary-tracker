@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Калькулятор зарплаты</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body class="bg-gradient-to-br from-gray-100 to-gray-200 min-h-screen">
     <div id="app" class="container mx-auto px-4 py-8 max-w-7xl"></div>
@@ -14,8 +15,7 @@
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, setDoc, getDoc, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
 
-        // 🔐 НАСТРОЙКА БЕЗОПАСНОСТИ - УКАЖИ СВОЙ EMAIL НАЧАЛЬНИКА ЗДЕСЬ!
-        const MANAGER_EMAIL = "gcsalary@gmail.com"; // ← ИЗМЕНИ НА СВОЙ EMAIL!
+        const MANAGER_EMAIL = "gcsalary@gmail.com";
 
         const firebaseConfig = {
             apiKey: "AIzaSyBxCYvHpwC37-NuQ_-iNhNpiApS7_qfQps",
@@ -34,87 +34,132 @@
         let userProfile = null;
         let shifts = [];
         let deductions = [];
+        let bonuses = [];
         let allBaristas = [];
         let selectedMonth = 'all';
         let selectedBaristaId = 'all';
         let showSettings = false;
+
+        const LOCATIONS = {
+            boxpark: { name: 'Бокс парк', fullHours: 15, fullSalary: 10000 },
+            aport: { name: 'Апорт', fullHours: 14, fullSalary: 10000 },
+            saryarka: { name: 'Сары арка', fullHours: 18, fullSalary: 13000 }
+        };
+
         let userSettings = {
             cashPercent: 3,
-            locations: {
-                boxpark: { name: 'Бокс парк', fullHours: 15, fullSalary: 10000 },
-                aport: { name: 'Апорт', fullHours: 14, fullSalary: 10000 },
-                saryarka: { name: 'Сары арка', fullHours: 18, fullSalary: 13000 }
+            customSalaries: {
+                boxpark: null,
+                aport: null,
+                saryarka: null
             }
         };
 
-        // === AUTH FUNCTIONS ===
+        let editingBaristaId = null;
+        let editingBaristaSettings = null;
+
+        // === WINDOW FUNCTIONS ===
+        window.register = register;
+        window.login = login;
+        window.logout = logout;
+        window.addShift = addShift;
+        window.deleteShift = deleteShift;
+        window.addDeduction = addDeduction;
+        window.deleteDeduction = deleteDeduction;
+        window.addBonus = addBonus;
+        window.deleteBonus = deleteBonus;
+        window.toggleSettings = toggleSettings;
+        window.updateCashPercent = updateCashPercent;
+        window.saveUserSettings = saveUserSettings;
+        window.changeMonth = changeMonth;
+        window.changeBarista = changeBarista;
+        window.openBaristaSettings = openBaristaSettings;
+        window.updateBaristaSettings = updateBaristaSettings;
+        window.saveBaristaSettings = saveBaristaSettings;
+        window.closeBaristaSettings = closeBaristaSettings;
+        window.updateTimeFromSlider = updateTimeFromSlider;
+
+        // === AUTH ===
         async function register() {
-            const email = document.getElementById('auth-email').value;
+            const email = document.getElementById('auth-email').value.trim();
             const password = document.getElementById('auth-password').value;
-            const name = document.getElementById('auth-name').value;
-            const role = document.getElementById('auth-role').value;
-        
+            const name = document.getElementById('auth-name').value.trim();
+
             if (!email || !password || !name) {
-                alert('Заполните все поля!');
+                alert('❌ Заполните все поля!');
                 return;
             }
-        
+
+            if (password.length < 6) {
+                alert('❌ Пароль должен быть минимум 6 символов!');
+                return;
+            }
+
             try {
-                // 🔐 АВТОМАТИЧЕСКОЕ назначение роли
-                const actualRole = email.toLowerCase() === MANAGER_EMAIL.toLowerCase() ? 'manager' : role;
-                
+                const role = email.toLowerCase() === MANAGER_EMAIL.toLowerCase() ? 'manager' : 'barista';
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
-        
+
                 await setDoc(doc(db, 'users', user.uid), {
                     name: name,
                     email: email,
-                    role: actualRole,
+                    role: role,
                     createdAt: new Date().toISOString()
                 });
-        
+
                 await setDoc(doc(db, 'userSettings', user.uid), userSettings);
-        
-                alert('✅ Регистрация успешна!');
+                alert(`✅ Регистрация успешна! Роль: ${role === 'manager' ? 'Менеджер' : 'Бариста'}`);
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                if (error.code === 'auth/email-already-in-use') {
+                    alert('❌ Этот email уже зарегистрирован!');
+                } else {
+                    alert('❌ Ошибка: ' + error.message);
+                }
             }
         }
 
         async function login() {
-            const email = document.getElementById('auth-email').value;
+            const email = document.getElementById('auth-email').value.trim();
             const password = document.getElementById('auth-password').value;
 
             if (!email || !password) {
-                alert('Введите email и пароль!');
+                alert('❌ Введите email и пароль!');
                 return;
             }
 
             try {
                 await signInWithEmailAndPassword(auth, email, password);
             } catch (error) {
-                alert('Ошибка входа: ' + error.message);
+                if (error.code === 'auth/user-not-found') {
+                    alert('❌ Пользователь не найден!');
+                } else if (error.code === 'auth/wrong-password') {
+                    alert('❌ Неверный пароль!');
+                } else {
+                    alert('❌ Ошибка входа: ' + error.message);
+                }
             }
         }
 
         async function logout() {
+            if (!confirm('Выйти из аккаунта?')) return;
             try {
                 await signOut(auth);
                 currentUser = null;
                 userProfile = null;
                 shifts = [];
                 deductions = [];
+                bonuses = [];
                 selectedMonth = 'all';
+                selectedBaristaId = 'all';
                 showSettings = false;
                 render();
             } catch (error) {
-                alert('Ошибка выхода: ' + error.message);
+                alert('❌ Ошибка выхода: ' + error.message);
             }
         }
 
         async function loadUserProfile() {
             if (!currentUser) return;
-            
             const userDoc = await getDoc(doc(db, 'users', currentUser.uid));
             if (userDoc.exists()) {
                 userProfile = { id: currentUser.uid, ...userDoc.data() };
@@ -123,7 +168,6 @@
 
         async function loadUserSettings() {
             if (!currentUser) return;
-            
             const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
             if (settingsDoc.exists()) {
                 userSettings = settingsDoc.data();
@@ -132,24 +176,26 @@
             }
         }
 
-        // === DATA FUNCTIONS ===
+        // === DATA ===
         async function loadData() {
-            if (!currentUser) return;
+            if (!currentUser || !userProfile) return;
 
             if (userProfile.role === 'manager') {
                 await loadAllBaristas();
                 await loadAllShifts();
                 await loadAllDeductions();
+                await loadAllBonuses();
             } else {
                 await loadMyShifts();
                 await loadMyDeductions();
+                await loadMyBonuses();
             }
 
             render();
         }
 
         async function loadAllBaristas() {
-            const q = query(collection(db, 'users'), where('role', 'in', ['barista', 'intern']));
+            const q = query(collection(db, 'users'), where('role', '==', 'barista'));
             const snapshot = await getDocs(q);
             allBaristas = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
@@ -163,6 +209,11 @@
         async function loadAllDeductions() {
             const snapshot = await getDocs(collection(db, 'deductions'));
             deductions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        async function loadAllBonuses() {
+            const snapshot = await getDocs(collection(db, 'bonuses'));
+            bonuses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
 
         async function loadMyShifts() {
@@ -181,46 +232,69 @@
             deductions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         }
 
+        async function loadMyBonuses() {
+            const q = query(collection(db, 'bonuses'), where('userId', '==', currentUser.uid));
+            const snapshot = await getDocs(q);
+            bonuses = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        }
+
+        function calculateHours(start, end) {
+            const [startH, startM] = start.split(':').map(Number);
+            const [endH, endM] = end.split(':').map(Number);
+            let startMinutes = startH * 60 + startM;
+            let endMinutes = endH * 60 + endM;
+            if (endMinutes <= startMinutes) {
+                endMinutes += 24 * 60;
+            }
+            return (endMinutes - startMinutes) / 60;
+        }
+
         async function addShift() {
             const date = document.getElementById('shift-date').value;
-            const location = document.getElementById('shift-location').value;
+            const locationKey = document.getElementById('shift-location').value;
             const startTime = document.getElementById('shift-start').value;
             const endTime = document.getElementById('shift-end').value;
             const cash = parseFloat(document.getElementById('shift-cash').value) || 0;
 
             if (!date || !startTime || !endTime) {
-                alert('Заполните все поля!');
+                alert('❌ Заполните дату и время!');
                 return;
             }
 
             const hours = calculateHours(startTime, endTime);
-            const isIntern = userProfile.role === 'intern';
             
-            let hourlySalary, cashBonus;
+            if (hours <= 0 || hours > 24) {
+                alert('❌ Проверьте время смены!');
+                return;
+            }
+
+            const location = LOCATIONS[locationKey];
+            const customSalary = userSettings.customSalaries[locationKey];
+            const baseSalary = customSalary !== null ? customSalary : location.fullSalary;
+            const hourlyRate = baseSalary / location.fullHours;
+            const hourlySalary = hourlyRate * hours;
+            const cashBonus = cash * (userSettings.cashPercent / 100);
             
-            if (isIntern) {
-                hourlySalary = (5000 / 8) * hours;
-                cashBonus = 0;
-            } else {
-                const loc = userSettings.locations[location];
-                const hourlyRate = loc.fullSalary / loc.fullHours;
-                hourlySalary = hourlyRate * hours;
-                cashBonus = cash * (userSettings.cashPercent / 100);
+            let autoBonus = 0;
+            if (locationKey === 'saryarka' && cash >= 160000) {
+                autoBonus = 2000;
             }
 
             const shiftData = {
                 userId: currentUser.uid,
                 userName: userProfile.name,
-                userRole: userProfile.role,
                 date: date,
-                location: location,
+                locationKey: locationKey,
+                locationName: location.name,
                 startTime: startTime,
                 endTime: endTime,
                 hours: hours,
                 cash: cash,
                 hourlySalary: hourlySalary,
                 cashBonus: cashBonus,
+                autoBonus: autoBonus,
                 cashPercent: userSettings.cashPercent,
+                baseSalary: baseSalary,
                 createdAt: new Date().toISOString()
             };
 
@@ -229,29 +303,35 @@
                 document.getElementById('shift-cash').value = '';
                 document.getElementById('shift-start').value = '';
                 document.getElementById('shift-end').value = '';
+                
+                if (autoBonus > 0) {
+                    alert(`✅ Смена добавлена! 🎁 Бонус за кассу: ${autoBonus}₸`);
+                } else {
+                    alert('✅ Смена добавлена!');
+                }
+                
                 await loadData();
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                alert('❌ Ошибка: ' + error.message);
             }
         }
 
         async function deleteShift(id) {
-            if (!confirm('Удалить эту смену?')) return;
-            
+            if (!confirm('❌ Удалить эту смену?')) return;
             try {
                 await deleteDoc(doc(db, 'shifts', id));
                 await loadData();
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                alert('❌ Ошибка: ' + error.message);
             }
         }
 
         async function addDeduction() {
-            const name = document.getElementById('deduction-name').value;
+            const name = document.getElementById('deduction-name').value.trim();
             const amount = parseFloat(document.getElementById('deduction-amount').value);
 
-            if (!name || !amount) {
-                alert('Заполните все поля!');
+            if (!name || !amount || amount <= 0) {
+                alert('❌ Заполните все поля корректно!');
                 return;
             }
 
@@ -270,45 +350,68 @@
                 await addDoc(collection(db, 'deductions'), deductionData);
                 document.getElementById('deduction-name').value = '';
                 document.getElementById('deduction-amount').value = '';
+                alert('✅ Вычет добавлен!');
                 await loadData();
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                alert('❌ Ошибка: ' + error.message);
             }
         }
 
         async function deleteDeduction(id) {
-            if (!confirm('Удалить этот вычет?')) return;
-            
+            if (!confirm('❌ Удалить этот вычет?')) return;
             try {
                 await deleteDoc(doc(db, 'deductions', id));
                 await loadData();
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                alert('❌ Ошибка: ' + error.message);
             }
         }
 
-        function calculateHours(start, end) {
-            const [startH, startM] = start.split(':').map(Number);
-            const [endH, endM] = end.split(':').map(Number);
-            
-            let startMinutes = startH * 60 + startM;
-            let endMinutes = endH * 60 + endM;
-            
-            if (endMinutes <= startMinutes) {
-                endMinutes += 24 * 60;
+        async function addBonus() {
+            const name = document.getElementById('bonus-name').value.trim();
+            const amount = parseFloat(document.getElementById('bonus-amount').value);
+
+            if (!name || !amount || amount <= 0) {
+                alert('❌ Заполните все поля корректно!');
+                return;
             }
-            
-            return (endMinutes - startMinutes) / 60;
+
+            const monthKey = selectedMonth === 'all' ? new Date().toISOString().slice(0, 7) : selectedMonth;
+
+            const bonusData = {
+                userId: currentUser.uid,
+                userName: userProfile.name,
+                name: name,
+                amount: amount,
+                month: monthKey,
+                createdAt: new Date().toISOString()
+            };
+
+            try {
+                await addDoc(collection(db, 'bonuses'), bonusData);
+                document.getElementById('bonus-name').value = '';
+                document.getElementById('bonus-amount').value = '';
+                alert('✅ Премия добавлена!');
+                await loadData();
+            } catch (error) {
+                alert('❌ Ошибка: ' + error.message);
+            }
         }
 
-        // === SETTINGS FUNCTIONS ===
+        async function deleteBonus(id) {
+            if (!confirm('❌ Удалить эту премию?')) return;
+            try {
+                await deleteDoc(doc(db, 'bonuses', id));
+                await loadData();
+            } catch (error) {
+                alert('❌ Ошибка: ' + error.message);
+            }
+        }
+
+        // === SETTINGS ===
         function toggleSettings() {
             showSettings = !showSettings;
             render();
-        }
-
-        function updateLocationSetting(key, field, value) {
-            userSettings.locations[key][field] = field === 'name' ? value : parseFloat(value);
         }
 
         function updateCashPercent(value) {
@@ -322,11 +425,68 @@
                 showSettings = false;
                 render();
             } catch (error) {
-                alert('Ошибка: ' + error.message);
+                alert('❌ Ошибка: ' + error.message);
             }
         }
 
-        // === FILTER & STATS FUNCTIONS ===
+        function openBaristaSettings(baristaId) {
+            editingBaristaId = baristaId;
+            loadBaristaSettings(baristaId);
+        }
+
+        async function loadBaristaSettings(baristaId) {
+            const settingsDoc = await getDoc(doc(db, 'userSettings', baristaId));
+            if (settingsDoc.exists()) {
+                editingBaristaSettings = settingsDoc.data();
+            } else {
+                editingBaristaSettings = {
+                    cashPercent: 3,
+                    customSalaries: {
+                        boxpark: null,
+                        aport: null,
+                        saryarka: null
+                    }
+                };
+            }
+            render();
+        }
+
+        function updateBaristaSettings(field, value) {
+            if (field === 'cashPercent') {
+                editingBaristaSettings.cashPercent = parseFloat(value);
+            } else {
+                const numValue = value === '' ? null : parseFloat(value);
+                editingBaristaSettings.customSalaries[field] = numValue;
+            }
+        }
+
+        async function saveBaristaSettings() {
+            if (!editingBaristaId) return;
+            try {
+                await setDoc(doc(db, 'userSettings', editingBaristaId), editingBaristaSettings);
+                alert('✅ Настройки бариста сохранены!');
+                editingBaristaId = null;
+                editingBaristaSettings = null;
+                await loadData();
+            } catch (error) {
+                alert('❌ Ошибка: ' + error.message);
+            }
+        }
+
+        function closeBaristaSettings() {
+            editingBaristaId = null;
+            editingBaristaSettings = null;
+            render();
+        }
+
+        function updateTimeFromSlider(field, value) {
+            const hours = Math.floor(value / 60);
+            const minutes = value % 60;
+            const timeString = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+            document.getElementById(field).value = timeString;
+        }
+
+        // === FILTERS & STATS ===
         function changeMonth(month) {
             selectedMonth = month;
             render();
@@ -352,6 +512,11 @@
             return deductionsArray.filter(d => d.month === month);
         }
 
+        function filterBonusesByMonth(bonusesArray, month) {
+            if (month === 'all') return bonusesArray;
+            return bonusesArray.filter(b => b.month === month);
+        }
+
         function filterShiftsByBarista(shiftsArray, baristaId) {
             if (baristaId === 'all') return shiftsArray;
             return shiftsArray.filter(s => s.userId === baristaId);
@@ -364,39 +529,42 @@
             return `${months[parseInt(month) - 1]} ${year}`;
         }
 
-        function getStatsByLocation(shiftsArray, isIntern) {
-            if (isIntern) return {};
-            
+        function getStatsByLocation(shiftsArray) {
             const stats = {};
             shiftsArray.forEach(shift => {
-                if (!stats[shift.location]) {
-                    stats[shift.location] = {
-                        name: userSettings.locations[shift.location]?.name || 'Неизвестно',
+                const key = shift.locationKey || 'unknown';
+                if (!stats[key]) {
+                    stats[key] = {
+                        name: shift.locationName || 'Неизвестно',
                         shifts: 0,
                         hours: 0,
                         cash: 0,
                         hourlySalary: 0,
                         cashBonus: 0,
+                        autoBonus: 0,
                         total: 0
                     };
                 }
-                stats[shift.location].shifts++;
-                stats[shift.location].hours += shift.hours;
-                stats[shift.location].cash += shift.cash;
-                stats[shift.location].hourlySalary += shift.hourlySalary;
-                stats[shift.location].cashBonus += shift.cashBonus;
-                stats[shift.location].total += shift.hourlySalary + shift.cashBonus;
+                stats[key].shifts++;
+                stats[key].hours += shift.hours;
+                stats[key].cash += shift.cash;
+                stats[key].hourlySalary += shift.hourlySalary;
+                stats[key].cashBonus += shift.cashBonus;
+                stats[key].autoBonus += shift.autoBonus || 0;
+                stats[key].total += shift.hourlySalary + shift.cashBonus + (shift.autoBonus || 0);
             });
             return stats;
         }
 
-        function getTotals(shiftsArray, deductionsArray) {
+        function getTotals(shiftsArray, deductionsArray, bonusesArray) {
             const totalShifts = shiftsArray.length;
             const totalHours = shiftsArray.reduce((sum, s) => sum + s.hours, 0);
             const totalCash = shiftsArray.reduce((sum, s) => sum + s.cash, 0);
             const totalHourlySalary = shiftsArray.reduce((sum, s) => sum + s.hourlySalary, 0);
             const totalCashBonus = shiftsArray.reduce((sum, s) => sum + s.cashBonus, 0);
-            const grossTotal = totalHourlySalary + totalCashBonus;
+            const totalAutoBonus = shiftsArray.reduce((sum, s) => sum + (s.autoBonus || 0), 0);
+            const totalBonuses = bonusesArray.reduce((sum, b) => sum + b.amount, 0);
+            const grossTotal = totalHourlySalary + totalCashBonus + totalAutoBonus + totalBonuses;
             const totalDeductions = deductionsArray.reduce((sum, d) => sum + d.amount, 0);
             const netTotal = grossTotal - totalDeductions;
 
@@ -406,39 +574,90 @@
                 totalCash,
                 totalHourlySalary,
                 totalCashBonus,
+                totalAutoBonus,
+                totalBonuses,
                 grossTotal,
                 totalDeductions,
                 netTotal
             };
         }
 
-        // === RENDER FUNCTIONS ===
+        function createChart(canvasId, shiftsArray) {
+            setTimeout(() => {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+
+                const stats = getStatsByLocation(shiftsArray);
+                const labels = Object.values(stats).map(s => s.name);
+                const data = Object.values(stats).map(s => s.total);
+
+                new Chart(canvas, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            label: 'Заработок по точкам (₸)',
+                            data: data,
+                            backgroundColor: [
+                                'rgba(79, 70, 229, 0.7)',
+                                'rgba(16, 185, 129, 0.7)',
+                                'rgba(245, 158, 11, 0.7)'
+                            ],
+                            borderColor: [
+                                'rgb(79, 70, 229)',
+                                'rgb(16, 185, 129)',
+                                'rgb(245, 158, 11)'
+                            ],
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value.toLocaleString() + '₸';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }, 100);
+        }
+
+        // === RENDER ===
         function renderAuth() {
             document.getElementById('app').innerHTML = `
                 <div class="max-w-md mx-auto">
                     <div class="bg-white rounded-2xl shadow-2xl p-8">
                         <div class="text-center mb-8">
-                            <h1 class="text-4xl font-bold text-gray-800 mb-2">💰 Калькулятор</h1>
+                            <h1 class="text-4xl font-bold text-gray-800 mb-2">☕ Калькулятор</h1>
                             <p class="text-gray-600">Зарплаты барист</p>
                         </div>
 
                         <div class="space-y-4 mb-6">
                             <input type="email" id="auth-email" placeholder="Email" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                            <input type="password" id="auth-password" placeholder="Пароль" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <input type="password" id="auth-password" placeholder="Пароль (минимум 6 символов)" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                             <input type="text" id="auth-name" placeholder="Ваше имя" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                            <select id="auth-role" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                                <option value="barista">☕ Бариста</option>
-                                <option value="intern">👨‍🎓 Стажёр</option>
-                            </select>
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                         </div>
 
-                        <div class="bg-green-50 border border-green-200 p-3 rounded-lg mb-4">
-                            <p class="text-xs text-green-800">
-                                🔐 <strong>Безопасность:</strong> Роль начальника назначается автоматически для зарегистрированного email
+                        <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-4">
+                            <p class="text-sm text-blue-800">
+                                <strong>ℹ️ Роли:</strong><br>
+                                • Email <strong>${MANAGER_EMAIL}</strong> → Менеджер<br>
+                                • Остальные email → Бариста
                             </p>
                         </div>
 
@@ -457,7 +676,132 @@
             `;
         }
 
+        function renderSettings() {
+            document.getElementById('app').innerHTML = `
+                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                    <div class="flex justify-between items-center mb-6">
+                        <h1 class="text-3xl font-bold text-gray-800">⚙️ Настройки</h1>
+                        <button onclick="window.toggleSettings()" 
+                            class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition">
+                            ← Назад
+                        </button>
+                    </div>
+
+                    <div class="bg-gray-50 p-6 rounded-xl mb-6">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">💵 Процент с кассы</h2>
+                        <div class="flex items-center gap-4">
+                            <input type="number" step="0.1" value="${userSettings.cashPercent}" 
+                                onchange="window.updateCashPercent(this.value)"
+                                class="w-32 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <span class="text-gray-700 font-semibold">%</span>
+                        </div>
+                        <p class="text-sm text-gray-600 mt-2">Процент от кассы, который идёт в вашу зарплату</p>
+                    </div>
+
+                    <div class="bg-blue-50 p-6 rounded-xl mb-6">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">📍 Локации</h2>
+                        <p class="text-sm text-blue-700 mb-4">Настройки локаций общие для всех и изменяются администратором в коде</p>
+                        <div class="space-y-3">
+                            ${Object.entries(LOCATIONS).map(([key, loc]) => `
+                                <div class="bg-white p-4 rounded-lg border border-gray-200">
+                                    <div class="font-semibold text-gray-800">${loc.name}</div>
+                                    <div class="text-sm text-gray-600">Полная смена: ${loc.fullHours}ч = ${loc.fullSalary.toLocaleString()}₸</div>
+                                    <div class="text-sm text-gray-600">Час работы: ${(loc.fullSalary / loc.fullHours).toFixed(2)}₸</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+
+                    <div class="flex gap-4">
+                        <button onclick="window.saveUserSettings()" 
+                            class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-lg transition text-lg">
+                            💾 Сохранить настройки
+                        </button>
+                        <button onclick="window.toggleSettings()" 
+                            class="px-6 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-4 rounded-lg transition">
+                            Отмена
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
         function renderManagerView() {
+            if (editingBaristaId && editingBaristaSettings) {
+                const barista = allBaristas.find(b => b.id === editingBaristaId);
+                document.getElementById('app').innerHTML = `
+                    <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                        <div class="flex justify-between items-center mb-6">
+                            <h1 class="text-3xl font-bold text-gray-800">⚙️ Настройки: ${barista.name}</h1>
+                            <button onclick="window.closeBaristaSettings()" 
+                                class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition">
+                                ← Назад
+                            </button>
+                        </div>
+
+                        <div class="space-y-6">
+                            <div class="bg-gray-50 p-6 rounded-xl">
+                                <h2 class="text-xl font-bold text-gray-800 mb-4">💵 Процент с кассы</h2>
+                                <div class="flex items-center gap-4">
+                                    <input type="number" step="0.1" value="${editingBaristaSettings.cashPercent}" 
+                                        onchange="window.updateBaristaSettings('cashPercent', this.value)"
+                                        class="w-32 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                    <span class="text-gray-700 font-semibold">%</span>
+                                </div>
+                            </div>
+
+                            <div class="bg-gray-50 p-6 rounded-xl">
+                                <h2 class="text-xl font-bold text-gray-800 mb-4">💰 Индивидуальные оклады</h2>
+                                <p class="text-sm text-gray-600 mb-4">Оставьте поле пустым, чтобы использовать стандартный оклад</p>
+                                
+                                <div class="space-y-4">
+                                    ${Object.entries(LOCATIONS).map(([key, loc]) => {
+                                        const customValue = editingBaristaSettings.customSalaries[key];
+                                        return `
+                                            <div class="bg-white p-4 rounded-lg border border-gray-200">
+                                                <div class="flex justify-between items-center mb-2">
+                                                    <div class="font-semibold text-gray-800">${loc.name}</div>
+                                                    <div class="text-sm text-gray-500">Стандарт: ${loc.fullSalary.toLocaleString()}₸</div>
+                                                </div>
+                                                <div class="flex items-center gap-2">
+                                                    <input type="number" 
+                                                        value="${customValue !== null ? customValue : ''}" 
+                                                        placeholder="${loc.fullSalary}"
+                                                        onchange="window.updateBaristaSettings('${key}', this.value)"
+                                                        class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                                    <span class="text-gray-600">₸</span>
+                                                </div>
+                                            </div>
+                                        `;
+                                    }).join('')}
+                                </div>
+                            </div>
+
+                            <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg">
+                                <p class="text-sm text-blue-800">
+                                    <strong>ℹ️ Информация:</strong><br>
+                                    • Стандартные оклады применяются если не указан индивидуальный<br>
+                                    • Новые настройки применяются только к новым сменам<br>
+                                    • Старые смены остаются с теми значениями, с которыми были добавлены
+                                </p>
+                            </div>
+
+                            <div class="flex gap-4">
+                                <button onclick="window.saveBaristaSettings()" 
+                                    class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-lg transition text-lg">
+                                    💾 Сохранить настройки
+                                </button>
+                                <button onclick="window.closeBaristaSettings()" 
+                                    class="px-6 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-4 rounded-lg transition">
+                                    Отмена
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+
             const baristaShifts = selectedBaristaId === 'all' 
                 ? shifts 
                 : filterShiftsByBarista(shifts, selectedBaristaId);
@@ -466,18 +810,23 @@
                 ? deductions
                 : deductions.filter(d => d.userId === selectedBaristaId);
 
+            const baristaBonuses = selectedBaristaId === 'all'
+                ? bonuses
+                : bonuses.filter(b => b.userId === selectedBaristaId);
+
             const availableMonths = getAvailableMonths(baristaShifts);
             const monthShifts = filterShiftsByMonth(baristaShifts, selectedMonth);
             const monthDeductions = filterDeductionsByMonth(baristaDeductions, selectedMonth);
+            const monthBonuses = filterBonusesByMonth(baristaBonuses, selectedMonth);
 
             const groupedByBarista = {};
             monthShifts.forEach(shift => {
                 if (!groupedByBarista[shift.userId]) {
                     groupedByBarista[shift.userId] = {
                         name: shift.userName,
-                        role: shift.userRole,
                         shifts: [],
-                        deductions: []
+                        deductions: [],
+                        bonuses: []
                     };
                 }
                 groupedByBarista[shift.userId].shifts.push(shift);
@@ -486,6 +835,12 @@
             monthDeductions.forEach(deduction => {
                 if (groupedByBarista[deduction.userId]) {
                     groupedByBarista[deduction.userId].deductions.push(deduction);
+                }
+            });
+
+            monthBonuses.forEach(bonus => {
+                if (groupedByBarista[bonus.userId]) {
+                    groupedByBarista[bonus.userId].bonuses.push(bonus);
                 }
             });
 
@@ -503,6 +858,7 @@
                     </div>
                 </div>
 
+                ${allBaristas.length > 0 ? `
                 <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">👥 Выберите бариста</h2>
                     <div class="flex flex-wrap gap-2">
@@ -511,13 +867,20 @@
                             Все бариста
                         </button>
                         ${allBaristas.map(barista => `
-                            <button onclick="window.changeBarista('${barista.id}')" 
-                                class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
-                                ${barista.role === 'intern' ? '👨‍🎓' : '☕'} ${barista.name}
-                            </button>
+                            <div class="flex gap-1">
+                                <button onclick="window.changeBarista('${barista.id}')" 
+                                    class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
+                                    ☕ ${barista.name}
+                                </button>
+                                <button onclick="window.openBaristaSettings('${barista.id}')" 
+                                    class="px-3 py-2 rounded-lg bg-gray-300 hover:bg-gray-400 transition" title="Настройки">
+                                    ⚙️
+                                </button>
+                            </div>
                         `).join('')}
                     </div>
                 </div>
+                ` : '<div class="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6"><p class="text-yellow-800">Нет зарегистрированных баристов</p></div>'}
 
                 ${availableMonths.length > 0 ? `
                 <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
@@ -537,17 +900,16 @@
                 </div>
                 ` : ''}
 
+                ${Object.keys(groupedByBarista).length > 0 ? `
                 <div class="space-y-6">
                     ${Object.entries(groupedByBarista).map(([userId, data]) => {
-                        const totals = getTotals(data.shifts, data.deductions);
-                        const isIntern = data.role === 'intern';
-                        const roleLabel = isIntern ? '👨‍🎓 Стажёр' : '☕ Бариста';
+                        const totals = getTotals(data.shifts, data.deductions, data.bonuses);
 
                         return `
                             <div class="bg-white rounded-xl shadow-lg p-6">
-                                <h2 class="text-2xl font-bold text-gray-800 mb-4">${roleLabel}: ${data.name}</h2>
+                                <h2 class="text-2xl font-bold text-gray-800 mb-4">☕ ${data.name}</h2>
                                 
-                                <div class="grid md:grid-cols-4 gap-4 mb-6">
+                                <div class="grid md:grid-cols-5 gap-4 mb-6">
                                     <div class="bg-blue-50 rounded-lg p-4">
                                         <div class="text-sm text-blue-600 mb-1">Смен</div>
                                         <div class="text-2xl font-bold text-blue-900">${totals.totalShifts}</div>
@@ -559,6 +921,11 @@
                                     <div class="bg-green-50 rounded-lg p-4">
                                         <div class="text-sm text-green-600 mb-1">Заработано</div>
                                         <div class="text-2xl font-bold text-green-900">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
+                                        ${totals.totalAutoBonus > 0 ? `<div class="text-xs text-green-700 mt-1">🎁 Бонусы: ${totals.totalAutoBonus.toLocaleString()}₸</div>` : ''}
+                                    </div>
+                                    <div class="bg-red-50 rounded-lg p-4">
+                                        <div class="text-sm text-red-600 mb-1">Вычеты</div>
+                                        <div class="text-2xl font-bold text-red-900">-${totals.totalDeductions.toLocaleString()}₸</div>
                                     </div>
                                     <div class="bg-indigo-50 rounded-lg p-4">
                                         <div class="text-sm text-indigo-600 mb-1">К выплате</div>
@@ -566,13 +933,12 @@
                                     </div>
                                 </div>
 
-                                ${data.shifts.length > 0 ? `
                                 <div class="overflow-x-auto">
                                     <table class="w-full text-sm">
                                         <thead class="bg-gray-50">
                                             <tr>
                                                 <th class="px-3 py-2 text-left font-semibold text-gray-700">Дата</th>
-                                                ${!isIntern ? '<th class="px-3 py-2 text-left font-semibold text-gray-700">Точка</th>' : ''}
+                                                <th class="px-3 py-2 text-left font-semibold text-gray-700">Точка</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Время</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Часы</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Касса</th>
@@ -583,109 +949,51 @@
                                             ${data.shifts.map(shift => `
                                                 <tr class="hover:bg-gray-50">
                                                     <td class="px-3 py-2 text-gray-700">${shift.date}</td>
-                                                    ${!isIntern ? `<td class="px-3 py-2 text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
+                                                    <td class="px-3 py-2 text-gray-700">${shift.locationName}</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
-                                                    <td class="px-3 py-2 text-right font-semibold text-green-600">${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸</td>
+                                                    <td class="px-3 py-2 text-right font-semibold text-green-600">${(shift.hourlySalary + shift.cashBonus + (shift.autoBonus || 0)).toFixed(0).toLocaleString()}₸</td>
                                                 </tr>
                                             `).join('')}
                                         </tbody>
                                     </table>
                                 </div>
-                                ` : '<p class="text-gray-500 text-center py-4">Нет смен за выбранный период</p>'}
 
-                                ${data.deductions.length > 0 ? `
-                                <div class="mt-4">
-                                    <h3 class="font-bold text-gray-800 mb-2">💸 Вычеты:</h3>
-                                    <div class="space-y-1">
-                                        ${data.deductions.map(d => `
-                                            <div class="flex justify-between bg-red-50 px-3 py-2 rounded">
-                                                <span class="text-gray-700">${d.name}</span>
-                                                <span class="text-red-600 font-semibold">-${d.amount.toLocaleString()}₸</span>
-                                            </div>
-                                        `).join('')}
+                                <div class="grid md:grid-cols-2 gap-4 mt-4">
+                                    ${data.bonuses.length > 0 ? `
+                                    <div>
+                                        <h3 class="font-bold text-gray-800 mb-2">🎁 Премии:</h3>
+                                        <div class="space-y-1">
+                                            ${data.bonuses.map(b => `
+                                                <div class="flex justify-between bg-green-50 px-3 py-2 rounded">
+                                                    <span class="text-gray-700">${b.name}</span>
+                                                    <span class="text-green-600 font-semibold">+${b.amount.toLocaleString()}₸</span>
+                                                </div>
+                                            `).join('')}
+                                        </div>
                                     </div>
+                                    ` : ''}
+                                    
+                                    ${data.deductions.length > 0 ? `
+                                    <div>
+                                        <h3 class="font-bold text-gray-800 mb-2">💸 Вычеты:</h3>
+                                        <div class="space-y-1">
+                                            ${data.deductions.map(d => `
+                                                <div class="flex justify-between bg-red-50 px-3 py-2 rounded">
+                                                    <span class="text-gray-700">${d.name}</span>
+                                                    <span class="text-red-600 font-semibold">-${d.amount.toLocaleString()}₸</span>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                    ` : ''}
                                 </div>
-                                ` : ''}
                             </div>
                         `;
                     }).join('')}
                 </div>
-            `;
-        }
-
-        function renderSettings() {
-            document.getElementById('app').innerHTML = `
-                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
-                    <div class="flex justify-between items-center mb-6">
-                        <h1 class="text-3xl font-bold text-gray-800">⚙️ Настройки</h1>
-                        <button onclick="window.toggleSettings()" 
-                            class="px-4 py-2 bg-gray-200 hover:bg-gray-300 rounded-lg font-semibold transition">
-                            ← Назад
-                        </button>
-                    </div>
-
-                    <div class="space-y-6">
-                        <div class="bg-gray-50 p-6 rounded-xl">
-                            <h2 class="text-xl font-bold text-gray-800 mb-4">💵 Процент с кассы</h2>
-                            <div class="flex items-center gap-4">
-                                <input type="number" step="0.1" value="${userSettings.cashPercent}" 
-                                    onchange="window.updateCashPercent(this.value)"
-                                    class="w-32 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                <span class="text-gray-700 font-semibold">%</span>
-                            </div>
-                        </div>
-
-                        <div class="bg-gray-50 p-6 rounded-xl">
-                            <h2 class="text-xl font-bold text-gray-800 mb-4">📍 Точки работы</h2>
-                            <div class="space-y-4">
-                                ${Object.entries(userSettings.locations).map(([key, loc]) => `
-                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
-                                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Название</label>
-                                                <input type="text" value="${loc.name}" 
-                                                    onchange="window.updateLocationSetting('${key}', 'name', this.value)"
-                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                            </div>
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Полная смена (часы)</label>
-                                                <input type="number" step="0.5" value="${loc.fullHours}" 
-                                                    onchange="window.updateLocationSetting('${key}', 'fullHours', this.value)"
-                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                            </div>
-                                            <div>
-                                                <label class="block text-sm font-medium text-gray-700 mb-2">Оклад (₸)</label>
-                                                <input type="number" value="${loc.fullSalary}" 
-                                                    onchange="window.updateLocationSetting('${key}', 'fullSalary', this.value)"
-                                                    class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                            </div>
-                                        </div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-
-                        <div class="flex gap-4">
-                            <button onclick="window.saveUserSettings()" 
-                                class="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-lg transition text-lg">
-                                💾 Сохранить настройки
-                            </button>
-                            <button onclick="window.toggleSettings()" 
-                                class="px-6 bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-4 rounded-lg transition">
-                                Отмена
-                            </button>
-                        </div>
-
-                        <div class="bg-yellow-50 border border-yellow-200 p-4 rounded-lg">
-                            <p class="text-sm text-yellow-800">
-                                <strong>⚠️ Важно:</strong> При изменении настроек старые смены сохранятся с теми значениями, 
-                                с которыми они были добавлены. Новые настройки будут применяться только к новым сменам.
-                            </p>
-                        </div>
-                    </div>
-                </div>
+                ` : '<div class="bg-gray-50 border border-gray-200 p-8 rounded-lg text-center"><p class="text-gray-600 text-lg">Нет данных за выбранный период</p></div>'}
             `;
         }
 
@@ -693,27 +1001,23 @@
             const availableMonths = getAvailableMonths(shifts);
             const monthShifts = filterShiftsByMonth(shifts, selectedMonth);
             const monthDeductions = filterDeductionsByMonth(deductions, selectedMonth);
-            const isIntern = userProfile.role === 'intern';
-            const stats = getStatsByLocation(monthShifts, isIntern);
-            const totals = getTotals(monthShifts, monthDeductions);
+            const monthBonuses = filterBonusesByMonth(bonuses, selectedMonth);
+            const stats = getStatsByLocation(monthShifts);
+            const totals = getTotals(monthShifts, monthDeductions, monthBonuses);
             const today = new Date().toISOString().split('T')[0];
-
-            const roleLabel = isIntern ? '👨‍🎓 Стажёр' : '☕ Бариста';
 
             document.getElementById('app').innerHTML = `
                 <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
                     <div class="flex justify-between items-center flex-wrap gap-4">
                         <div>
                             <h1 class="text-3xl font-bold text-gray-800 mb-2">💰 Калькулятор зарплаты</h1>
-                            <p class="text-gray-600">${roleLabel}: ${userProfile.name} (${currentUser.email})</p>
+                            <p class="text-gray-600">☕ Бариста: ${userProfile.name} (${currentUser.email})</p>
                         </div>
                         <div class="flex gap-2">
-                            ${!isIntern ? `
                             <button onclick="window.toggleSettings()" 
                                 class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition">
                                 ⚙️ Настройки
                             </button>
-                            ` : ''}
                             <button onclick="window.logout()" 
                                 class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
                                 🚪 Выход
@@ -721,14 +1025,6 @@
                         </div>
                     </div>
                 </div>
-
-                ${isIntern ? `
-                <div class="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-6">
-                    <p class="text-blue-800">
-                        <strong>ℹ️ Стажёр:</strong> Ваша ставка: 8 часов = 5000₸ на любой точке
-                    </p>
-                </div>
-                ` : ''}
 
                 ${availableMonths.length > 0 ? `
                 <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
@@ -774,6 +1070,8 @@
                         <div class="bg-white bg-opacity-20 rounded-lg p-4">
                             <div class="text-sm opacity-90 mb-1">Заработано</div>
                             <div class="text-2xl font-bold">${totals.grossTotal.toFixed(0).toLocaleString()}₸</div>
+                            ${totals.totalAutoBonus > 0 ? `<div class="text-xs opacity-80 mt-1">🎁 Бонусы: ${totals.totalAutoBonus.toLocaleString()}₸</div>` : ''}
+                            ${totals.totalBonuses > 0 ? `<div class="text-xs opacity-80 mt-1">🎁 Премии: ${totals.totalBonuses.toLocaleString()}₸</div>` : ''}
                         </div>
                         <div class="bg-white bg-opacity-20 rounded-lg p-4">
                             <div class="text-sm opacity-90 mb-1">Вычеты</div>
@@ -786,7 +1084,51 @@
                     </div>
                 </div>
 
-                <div class="grid md:grid-cols-2 gap-6 mb-6">
+                ${monthShifts.length > 0 ? `
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📊 Диаграмма заработка по точкам</h2>
+                    <div class="h-64">
+                        <canvas id="earnings-chart"></canvas>
+                    </div>
+                </div>
+                ` : ''}
+
+                ${Object.keys(stats).length > 0 ? `
+                <div class="grid lg:grid-cols-3 gap-6 mb-6">
+                    ${Object.entries(stats).map(([key, stat]) => {
+                        const colors = {
+                            boxpark: 'from-indigo-500 to-indigo-600',
+                            aport: 'from-green-500 to-green-600',
+                            saryarka: 'from-amber-500 to-amber-600'
+                        };
+                        return `
+                            <div class="bg-gradient-to-br ${colors[key] || 'from-gray-500 to-gray-600'} rounded-xl shadow-lg p-6 text-white">
+                                <h3 class="text-xl font-bold mb-4">📍 ${stat.name}</h3>
+                                <div class="space-y-2">
+                                    <div class="flex justify-between">
+                                        <span class="opacity-90">Смен:</span>
+                                        <span class="font-bold">${stat.shifts}</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="opacity-90">Часов:</span>
+                                        <span class="font-bold">${stat.hours.toFixed(1)}ч</span>
+                                    </div>
+                                    <div class="flex justify-between">
+                                        <span class="opacity-90">Касса:</span>
+                                        <span class="font-bold">${stat.cash.toLocaleString()}₸</span>
+                                    </div>
+                                    <div class="flex justify-between border-t border-white border-opacity-30 pt-2 mt-2">
+                                        <span class="opacity-90">Заработано:</span>
+                                        <span class="font-bold text-lg">${stat.total.toFixed(0).toLocaleString()}₸</span>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                ` : ''}
+
+                <div class="grid lg:grid-cols-3 gap-6 mb-6">
                     <div class="bg-white rounded-xl shadow-lg p-6">
                         <h2 class="text-xl font-bold text-gray-800 mb-4">➕ Добавить смену</h2>
                         
@@ -797,34 +1139,32 @@
                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                             </div>
 
-                            ${!isIntern ? `
                             <div>
                                 <label class="block text-sm font-medium text-gray-700 mb-2">📍 Точка</label>
                                 <select id="shift-location" 
                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                    ${Object.entries(userSettings.locations).map(([key, loc]) => 
-                                        `<option value="${key}">${loc.name} (${loc.fullHours}ч - ${loc.fullSalary}₸)</option>`
+                                    ${Object.entries(LOCATIONS).map(([key, loc]) => 
+                                        `<option value="${key}">${loc.name} (${loc.fullHours}ч = ${loc.fullSalary}₸)</option>`
                                     ).join('')}
                                 </select>
                             </div>
-                            ` : `
-                            <input type="hidden" id="shift-location" value="intern">
-                            <div class="bg-blue-50 p-3 rounded-lg">
-                                <p class="text-sm text-blue-800">Стажёр: 8ч = 5000₸</p>
-                            </div>
-                            `}
 
-                            <div class="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">🕐 Начало</label>
-                                    <input type="time" id="shift-start" 
-                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                </div>
-                                <div>
-                                    <label class="block text-sm font-medium text-gray-700 mb-2">🕐 Конец</label>
-                                    <input type="time" id="shift-end" 
-                                        class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">🕐 Начало</label>
+                                <input type="time" id="shift-start" 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                <input type="range" min="0" max="1439" step="30" value="420"
+                                    oninput="window.updateTimeFromSlider('shift-start', this.value)"
+                                    class="w-full mt-2">
+                            </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-2">🕐 Конец</label>
+                                <input type="time" id="shift-end" 
+                                    class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                                <input type="range" min="0" max="1439" step="30" value="1020"
+                                    oninput="window.updateTimeFromSlider('shift-end', this.value)"
+                                    class="w-full mt-2">
                             </div>
 
                             <div>
@@ -841,10 +1181,40 @@
                     </div>
 
                     <div class="bg-white rounded-xl shadow-lg p-6">
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">💸 Вычеты ${selectedMonth !== 'all' ? '(' + getMonthName(selectedMonth) + ')' : ''}</h2>
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">🎁 Премии</h2>
                         
                         <div class="space-y-4 mb-4">
-                            <input type="text" id="deduction-name" placeholder="Название (аванс, штраф)" 
+                            <input type="text" id="bonus-name" placeholder="Название (премия, бонус)" 
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <input type="number" id="bonus-amount" placeholder="Сумма (₸)" 
+                                class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
+                            <button onclick="window.addBonus()" 
+                                class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 rounded-lg transition">
+                                Добавить премию
+                            </button>
+                        </div>
+
+                        ${monthBonuses.length > 0 ? `
+                        <div class="space-y-2 max-h-64 overflow-y-auto">
+                            ${monthBonuses.map(b => `
+                                <div class="flex justify-between items-center bg-green-50 p-3 rounded-lg">
+                                    <div>
+                                        <div class="font-semibold text-gray-800">${b.name}</div>
+                                        <div class="text-green-600">+${b.amount.toLocaleString()}₸</div>
+                                    </div>
+                                    <button onclick="window.deleteBonus('${b.id}')" 
+                                        class="text-red-600 hover:text-red-800 text-xl">🗑️</button>
+                                </div>
+                            `).join('')}
+                        </div>
+                        ` : '<p class="text-gray-500 text-center py-4">Премий нет</p>'}
+                    </div>
+
+                    <div class="bg-white rounded-xl shadow-lg p-6">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">💸 Вычеты</h2>
+                        
+                        <div class="space-y-4 mb-4">
+                            <input type="text" id="deduction-name" placeholder="Название (штраф, аванс)" 
                                 class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                             <input type="number" id="deduction-amount" placeholder="Сумма (₸)" 
                                 class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
@@ -854,6 +1224,7 @@
                             </button>
                         </div>
 
+                        ${monthDeductions.length > 0 ? `
                         <div class="space-y-2 max-h-64 overflow-y-auto">
                             ${monthDeductions.map(d => `
                                 <div class="flex justify-between items-center bg-red-50 p-3 rounded-lg">
@@ -866,80 +1237,39 @@
                                 </div>
                             `).join('')}
                         </div>
+                        ` : '<p class="text-gray-500 text-center py-4">Вычетов нет</p>'}
                     </div>
                 </div>
 
-                ${!isIntern && Object.keys(stats).length > 0 ? `
-                <div class="grid md:grid-cols-3 gap-6 mb-6">
-                    ${Object.entries(stats).map(([key, stat]) => `
-                        <div class="bg-white rounded-xl shadow-lg p-6">
-                            <h3 class="text-lg font-bold text-gray-800 mb-4">${stat.name}</h3>
-                            <div class="space-y-2 text-sm">
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">Смен:</span>
-                                    <span class="font-semibold">${stat.shifts}</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">Часов:</span>
-                                    <span class="font-semibold">${stat.hours.toFixed(1)}ч</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">Касса:</span>
-                                    <span class="font-semibold">${stat.cash.toLocaleString()}₸</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">ЗП (оклад):</span>
-                                    <span class="font-semibold text-green-600">${stat.hourlySalary.toFixed(0).toLocaleString()}₸</span>
-                                </div>
-                                <div class="flex justify-between">
-                                    <span class="text-gray-600">ЗП (касса):</span>
-                                    <span class="font-semibold text-green-600">${stat.cashBonus.toFixed(0).toLocaleString()}₸</span>
-                                </div>
-                                <div class="flex justify-between pt-2 border-t">
-                                    <span class="text-gray-800 font-bold">Всего:</span>
-                                    <span class="font-bold text-indigo-600">${stat.total.toFixed(0).toLocaleString()}₸</span>
-                                </div>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                ` : ''}
-
+                ${monthShifts.length > 0 ? `
                 <div class="bg-white rounded-xl shadow-lg p-6">
-                    <h2 class="text-xl font-bold text-gray-800 mb-4">📋 История смен</h2>
+                    <h2 class="text-xl font-bold text-gray-800 mb-4">📝 История смен</h2>
                     <div class="overflow-x-auto">
-                        <table class="w-full">
+                        <table class="w-full text-sm">
                             <thead class="bg-gray-50">
                                 <tr>
-                                    <th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Дата</th>
-                                    ${!isIntern ? '<th class="px-4 py-3 text-left text-sm font-semibold text-gray-700">Точка</th>' : ''}
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Время</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Часы</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Касса</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (оклад)</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">ЗП (касса)</th>
-                                    <th class="px-4 py-3 text-right text-sm font-semibold text-gray-700">Итого</th>
-                                    <th class="px-4 py-3"></th>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">Дата</th>
+                                    <th class="px-4 py-3 text-left font-semibold text-gray-700">Точка</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">Время</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">Часы</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">Касса</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">ЗП</th>
+                                    <th class="px-4 py-3 text-center font-semibold text-gray-700">Действия</th>
                                 </tr>
                             </thead>
                             <tbody class="divide-y divide-gray-200">
                                 ${monthShifts.map(shift => `
                                     <tr class="hover:bg-gray-50">
-                                        <td class="px-4 py-3 text-sm text-gray-700">${shift.date}</td>
-                                        ${!isIntern ? `<td class="px-4 py-3 text-sm text-gray-700">${userSettings.locations[shift.location]?.name || 'Стажёр'}</td>` : ''}
-                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
-                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
-                                        <td class="px-4 py-3 text-sm text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
-                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
-                                            ${shift.hourlySalary.toFixed(0).toLocaleString()}₸
+                                        <td class="px-4 py-3 text-gray-700">${shift.date}</td>
+                                        <td class="px-4 py-3 text-gray-700">${shift.locationName}</td>
+                                        <td class="px-4 py-3 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
+                                        <td class="px-4 py-3 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
+                                        <td class="px-4 py-3 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
+                                        <td class="px-4 py-3 text-right text-indigo-600 font-bold">
+                                            ${(shift.hourlySalary + shift.cashBonus + (shift.autoBonus || 0)).toFixed(0).toLocaleString()}₸
+                                            ${(shift.autoBonus || 0) > 0 ? `<div class="text-xs text-green-600">🎁 +${shift.autoBonus}₸</div>` : ''}
                                         </td>
-                                        <td class="px-4 py-3 text-sm text-right text-green-600 font-semibold">
-                                            ${shift.cashBonus.toFixed(0).toLocaleString()}₸
-                                        </td>
-                                        <td class="px-4 py-3 text-sm text-right text-indigo-600 font-bold">
-                                            ${(shift.hourlySalary + shift.cashBonus).toFixed(0).toLocaleString()}₸
-                                        </td>
-                                        <td class="px-4 py-3">
+                                        <td class="px-4 py-3 text-center">
                                             <button onclick="window.deleteShift('${shift.id}')" 
                                                 class="text-red-600 hover:text-red-800 text-xl">🗑️</button>
                                         </td>
@@ -949,16 +1279,21 @@
                         </table>
                     </div>
                 </div>
+                ` : '<div class="bg-gray-50 border border-gray-200 p-8 rounded-lg text-center"><p class="text-gray-600 text-lg">Нет данных за выбранный период</p></div>'}
             `;
+
+            if (monthShifts.length > 0) {
+                createChart('earnings-chart', monthShifts);
+            }
         }
 
         function render() {
-            if (!currentUser || !userProfile) {
+            if (!currentUser) {
                 renderAuth();
-            } else if (userProfile.role === 'manager') {
-                renderManagerView();
             } else if (showSettings) {
                 renderSettings();
+            } else if (userProfile?.role === 'manager') {
+                renderManagerView();
             } else {
                 renderBaristaView();
             }
@@ -974,22 +1309,6 @@
                 render();
             }
         });
-
-        window.register = register;
-        window.login = login;
-        window.logout = logout;
-        window.addShift = addShift;
-        window.deleteShift = deleteShift;
-        window.addDeduction = addDeduction;
-        window.deleteDeduction = deleteDeduction;
-        window.changeMonth = changeMonth;
-        window.changeBarista = changeBarista;
-        window.toggleSettings = toggleSettings;
-        window.updateLocationSetting = updateLocationSetting;
-        window.updateCashPercent = updateCashPercent;
-        window.saveUserSettings = saveUserSettings;
-
-        render();
     </script>
 </body>
-</html>
+</html> 
