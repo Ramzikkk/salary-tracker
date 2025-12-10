@@ -83,20 +83,34 @@
         let showSettings = false;
 
         const LOCATIONS = {
-            boxpark: { name: 'Бокс парк', fullHours: 15, fullSalary: 10000 },
-            aport: { name: 'Апорт', fullHours: 14, fullSalary: 10000 },
-            saryarka: { name: 'Сары арка', fullHours: 18, fullSalary: 13000 }
+            boxpark: { 
+                name: 'Бокс парк', 
+                fullHours: 15, 
+                weekdaySalary: 10000,
+                weekendSalary: 10000
+            },
+            aport: { 
+                name: 'Апорт', 
+                fullHours: 14, 
+                weekdaySalary: 9000,
+                weekendSalary: 10000
+            },
+            saryarka: { 
+                name: 'Сары арка', 
+                fullHours: 18, 
+                weekdaySalary: 13000,
+                weekendSalary: 13000
+            }
         };
 
         let userSettings = {
             cashPercent: 3,
             customSalaries: {
-                boxpark: null,
-                aport: null,
-                saryarka: null
+                boxpark: { weekday: null, weekend: null },
+                aport: { weekday: null, weekend: null },
+                saryarka: { weekday: null, weekend: null }
             }
         };
-
         let editingBaristaId = null;
         let editingBaristaSettings = null;
         let editingBaristaName = null;
@@ -113,6 +127,7 @@
         window.deleteBonus = deleteBonus;
         window.toggleSettings = toggleSettings;
         window.updateCashPercent = updateCashPercent;
+        window.updateCustomSalary = updateCustomSalary;
         window.saveUserSettings = saveUserSettings;
         window.changeMonth = changeMonth;
         window.changeBarista = changeBarista;
@@ -381,17 +396,34 @@
 
             const location = LOCATIONS[locationKey];
             
-            // Ensure customSalaries exists
+            // Определяем день недели (0 = воскресенье, 5 = пятница, 6 = суббота)
+            const dayOfWeek = new Date(date).getDay();
+            const isWeekend = dayOfWeek === 0 || dayOfWeek === 5 || dayOfWeek === 6; // Пятница, Суббота, Воскресенье
+            
+            // Ensure customSalaries exists with new structure
             if (!userSettings.customSalaries) {
                 userSettings.customSalaries = {
-                    boxpark: null,
-                    aport: null,
-                    saryarka: null
+                    boxpark: { weekday: null, weekend: null },
+                    aport: { weekday: null, weekend: null },
+                    saryarka: { weekday: null, weekend: null }
                 };
             }
             
-            const customSalary = userSettings.customSalaries[locationKey];
-            const baseSalary = customSalary !== null ? customSalary : location.fullSalary;
+            // Ensure location has both salary types
+            if (!userSettings.customSalaries[locationKey]) {
+                userSettings.customSalaries[locationKey] = { weekday: null, weekend: null };
+            }
+            
+            // Выбираем правильный оклад
+            let baseSalary;
+            if (isWeekend) {
+                const customWeekendSalary = userSettings.customSalaries[locationKey].weekend;
+                baseSalary = customWeekendSalary !== null ? customWeekendSalary : location.weekendSalary;
+            } else {
+                const customWeekdaySalary = userSettings.customSalaries[locationKey].weekday;
+                baseSalary = customWeekdaySalary !== null ? customWeekdaySalary : location.weekdaySalary;
+            }
+            
             const hourlyRate = baseSalary / location.fullHours;
             const hourlySalary = hourlyRate * hours;
             const cashBonus = cash * (userSettings.cashPercent / 100);
@@ -416,6 +448,7 @@
                 autoBonus: autoBonus,
                 cashPercent: userSettings.cashPercent,
                 baseSalary: baseSalary,
+                isWeekend: isWeekend,
                 createdAt: new Date().toISOString()
             };
 
@@ -425,10 +458,11 @@
                 document.getElementById('shift-start').value = '';
                 document.getElementById('shift-end').value = '';
                 
+                const dayType = isWeekend ? 'Выходной' : 'Будний';
                 if (autoBonus > 0) {
-                    alert(`✅ Смена добавлена! 🎁 Бонус за кассу: ${autoBonus}₸`);
+                    alert(`✅ Смена добавлена! (${dayType} день)\n🎁 Бонус за кассу: ${autoBonus}₸`);
                 } else {
-                    alert('✅ Смена добавлена!');
+                    alert(`✅ Смена добавлена! (${dayType} день)`);
                 }
                 
                 await loadData();
@@ -539,6 +573,21 @@
             userSettings.cashPercent = parseFloat(value);
         }
 
+        function updateCustomSalary(locationKey, dayType, value) {
+            const numValue = value === '' ? null : parseFloat(value);
+            if (!userSettings.customSalaries) {
+                userSettings.customSalaries = {
+                    boxpark: { weekday: null, weekend: null },
+                    aport: { weekday: null, weekend: null },
+                    saryarka: { weekday: null, weekend: null }
+                };
+            }
+            if (!userSettings.customSalaries[locationKey]) {
+                userSettings.customSalaries[locationKey] = { weekday: null, weekend: null };
+            }
+            userSettings.customSalaries[locationKey][dayType] = numValue;
+        }
+
         async function saveUserSettings() {
             try {
                 await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
@@ -582,12 +631,15 @@
             render();
         }
 
-        function updateBaristaSettings(field, value) {
+        function updateBaristaSettings(field, dayType, value) {
             if (field === 'cashPercent') {
                 editingBaristaSettings.cashPercent = parseFloat(value);
             } else {
                 const numValue = value === '' ? null : parseFloat(value);
-                editingBaristaSettings.customSalaries[field] = numValue;
+                if (!editingBaristaSettings.customSalaries[field]) {
+                    editingBaristaSettings.customSalaries[field] = { weekday: null, weekend: null };
+                }
+                editingBaristaSettings.customSalaries[field][dayType] = numValue;
             }
         }
 
@@ -1011,7 +1063,7 @@
 
         function renderSettings() {
             document.getElementById('app').innerHTML = `
-                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6 fade-in">
                     <div class="flex justify-between items-center mb-6">
                         <h1 class="text-3xl font-bold text-gray-800">⚙️ Настройки</h1>
                         <button onclick="window.toggleSettings()" 
@@ -1031,18 +1083,77 @@
                         <p class="text-sm text-gray-600 mt-2">Процент от кассы, который идёт в вашу зарплату</p>
                     </div>
 
+                    <div class="bg-gray-50 p-6 rounded-xl mb-6">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">💰 Индивидуальные оклады</h2>
+                        <p class="text-sm text-gray-600 mb-4">Оставьте поле пустым, чтобы использовать стандартный оклад</p>
+                        
+                        <div class="space-y-4">
+                            ${Object.entries(LOCATIONS).map(([key, loc]) => {
+                                const customWeekday = userSettings.customSalaries[key]?.weekday;
+                                const customWeekend = userSettings.customSalaries[key]?.weekend;
+                                return `
+                                    <div class="bg-white p-4 rounded-lg border border-gray-200">
+                                        <div class="font-semibold text-gray-800 mb-3">${loc.name}</div>
+                                        
+                                        <div class="grid md:grid-cols-2 gap-3">
+                                            <div>
+                                                <label class="text-xs text-gray-600 block mb-1">Будни (Пн-Чт)</label>
+                                                <div class="flex items-center gap-2">
+                                                    <input type="number" 
+                                                        id="salary-${key}-weekday"
+                                                        value="${customWeekday !== null && customWeekday !== undefined ? customWeekday : ''}" 
+                                                        placeholder="${loc.weekdaySalary}"
+                                                        onchange="window.updateCustomSalary('${key}', 'weekday', this.value)"
+                                                        class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                                                    <span class="text-gray-600 text-sm">₸</span>
+                                                </div>
+                                                <p class="text-xs text-gray-500 mt-1">Стандарт: ${loc.weekdaySalary.toLocaleString()}₸</p>
+                                            </div>
+                                            
+                                            <div>
+                                                <label class="text-xs text-gray-600 block mb-1">Выходные (Пт-Вс) 🎉</label>
+                                                <div class="flex items-center gap-2">
+                                                    <input type="number" 
+                                                        id="salary-${key}-weekend"
+                                                        value="${customWeekend !== null && customWeekend !== undefined ? customWeekend : ''}" 
+                                                        placeholder="${loc.weekendSalary}"
+                                                        onchange="window.updateCustomSalary('${key}', 'weekend', this.value)"
+                                                        class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                                                    <span class="text-gray-600 text-sm">₸</span>
+                                                </div>
+                                                <p class="text-xs text-gray-500 mt-1">Стандарт: ${loc.weekendSalary.toLocaleString()}₸</p>
+                                            </div>
+                                        </div>
+                                        
+                                        <p class="text-xs text-gray-500 mt-2">За полную смену ${loc.fullHours}ч</p>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
+
                     <div class="bg-blue-50 p-6 rounded-xl mb-6">
-                        <h2 class="text-xl font-bold text-gray-800 mb-4">📍 Локации</h2>
-                        <p class="text-sm text-blue-700 mb-4">Настройки локаций общие для всех и изменяются администратором в коде</p>
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">📍 Стандартные ставки локаций</h2>
+                        <p class="text-sm text-blue-700 mb-4">Эти ставки используются если не указан индивидуальный оклад</p>
                         <div class="space-y-3">
                             ${Object.entries(LOCATIONS).map(([key, loc]) => `
                                 <div class="bg-white p-4 rounded-lg border border-gray-200">
                                     <div class="font-semibold text-gray-800">${loc.name}</div>
-                                    <div class="text-sm text-gray-600">Полная смена: ${loc.fullHours}ч = ${loc.fullSalary.toLocaleString()}₸</div>
-                                    <div class="text-sm text-gray-600">Час работы: ${(loc.fullSalary / loc.fullHours).toFixed(2)}₸</div>
+                                    <div class="text-sm text-gray-600">Будни (Пн-Чт): ${loc.fullHours}ч = ${loc.weekdaySalary.toLocaleString()}₸ (${(loc.weekdaySalary / loc.fullHours).toFixed(2)}₸/ч)</div>
+                                    <div class="text-sm text-gray-600">Выходные (Пт-Вс): ${loc.fullHours}ч = ${loc.weekendSalary.toLocaleString()}₸ (${(loc.weekendSalary / loc.fullHours).toFixed(2)}₸/ч)</div>
                                 </div>
                             `).join('')}
                         </div>
+                    </div>
+
+                    <div class="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6">
+                        <p class="text-sm text-yellow-800">
+                            <strong>ℹ️ Информация:</strong><br>
+                            • Новые настройки применяются только к новым сменам<br>
+                            • Старые смены остаются с теми значениями, с которыми были добавлены<br>
+                            • Если оставить поле пустым, будет использован стандартный оклад<br>
+                            • Выходные: Пятница, Суббота, Воскресенье 🎉
+                        </p>
                     </div>
 
                     <div class="flex gap-4">
@@ -1099,21 +1210,41 @@
                                 
                                 <div class="space-y-4">
                                     ${Object.entries(LOCATIONS).map(([key, loc]) => {
-                                        const customValue = editingBaristaSettings.customSalaries[key];
+                                        const customWeekday = editingBaristaSettings.customSalaries[key]?.weekday;
+                                        const customWeekend = editingBaristaSettings.customSalaries[key]?.weekend;
                                         return `
                                             <div class="bg-white p-4 rounded-lg border border-gray-200">
-                                                <div class="flex justify-between items-center mb-2">
-                                                    <div class="font-semibold text-gray-800">${loc.name}</div>
-                                                    <div class="text-sm text-gray-500">Стандарт: ${loc.fullSalary.toLocaleString()}₸</div>
+                                                <div class="font-semibold text-gray-800 mb-3">${loc.name}</div>
+                                                
+                                                <div class="grid md:grid-cols-2 gap-3">
+                                                    <div>
+                                                        <label class="text-xs text-gray-600 block mb-1">Будни (Пн-Чт)</label>
+                                                        <div class="flex items-center gap-2">
+                                                            <input type="number" 
+                                                                value="${customWeekday !== null && customWeekday !== undefined ? customWeekday : ''}" 
+                                                                placeholder="${loc.weekdaySalary}"
+                                                                onchange="window.updateBaristaSettings('${key}', 'weekday', this.value)"
+                                                                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                                                            <span class="text-gray-600 text-sm">₸</span>
+                                                        </div>
+                                                        <p class="text-xs text-gray-500 mt-1">Стандарт: ${loc.weekdaySalary.toLocaleString()}₸</p>
+                                                    </div>
+                                                    
+                                                    <div>
+                                                        <label class="text-xs text-gray-600 block mb-1">Выходные (Пт-Вс) 🎉</label>
+                                                        <div class="flex items-center gap-2">
+                                                            <input type="number" 
+                                                                value="${customWeekend !== null && customWeekend !== undefined ? customWeekend : ''}" 
+                                                                placeholder="${loc.weekendSalary}"
+                                                                onchange="window.updateBaristaSettings('${key}', 'weekend', this.value)"
+                                                                class="flex-1 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 text-sm">
+                                                            <span class="text-gray-600 text-sm">₸</span>
+                                                        </div>
+                                                        <p class="text-xs text-gray-500 mt-1">Стандарт: ${loc.weekendSalary.toLocaleString()}₸</p>
+                                                    </div>
                                                 </div>
-                                                <div class="flex items-center gap-2">
-                                                    <input type="number" 
-                                                        value="${customValue !== null ? customValue : ''}" 
-                                                        placeholder="${loc.fullSalary}"
-                                                        onchange="window.updateBaristaSettings('${key}', this.value)"
-                                                        class="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
-                                                    <span class="text-gray-600">₸</span>
-                                                </div>
+                                                
+                                                <p class="text-xs text-gray-500 mt-2">За полную смену ${loc.fullHours}ч</p>
                                             </div>
                                         `;
                                     }).join('')}
@@ -1370,6 +1501,8 @@
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Время</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Часы</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">Касса</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">ЗП (оклад)</th>
+                                                <th class="px-3 py-2 text-right font-semibold text-gray-700">ЗП (процент)</th>
                                                 <th class="px-3 py-2 text-right font-semibold text-gray-700">ЗП</th>
                                                 <th class="px-3 py-2 text-center font-semibold text-gray-700">Действия</th>
                                             </tr>
@@ -1377,12 +1510,23 @@
                                         <tbody class="divide-y divide-gray-200">
                                             ${data.shifts.map(shift => `
                                                 <tr class="hover:bg-gray-50">
-                                                    <td class="px-3 py-2 text-gray-700">${shift.date}</td>
+                                                    <td class="px-3 py-2 text-gray-700">
+                                                        ${shift.date}
+                                                        ${shift.isWeekend ? '<span class="text-xs text-orange-600 ml-1">🎉</span>' : ''}
+                                                    </td>
                                                     <td class="px-3 py-2 text-gray-700">${shift.locationName}</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
                                                     <td class="px-3 py-2 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
-                                                    <td class="px-3 py-2 text-right font-semibold text-green-600">${(shift.hourlySalary + shift.cashBonus + (shift.autoBonus || 0)).toFixed(0).toLocaleString()}₸</td>
+                                                    <td class="px-3 py-2 text-right text-blue-600 font-semibold">
+                                                        ${shift.hourlySalary.toFixed(0).toLocaleString()}₸
+                                                    </td>
+                                                    <td class="px-3 py-2 text-right text-green-600 font-semibold">
+                                                        ${shift.cashBonus.toFixed(0).toLocaleString()}₸
+                                                    </td>
+                                                    <td class="px-3 py-2 text-right text-indigo-600 font-bold">
+                                                        ${(shift.hourlySalary + shift.cashBonus + (shift.autoBonus || 0)).toFixed(0).toLocaleString()}₸
+                                                    </td>
                                                     <td class="px-3 py-2 text-center">
                                                         <button onclick="window.deleteShift('${shift.id}')" 
                                                             class="text-red-600 hover:text-red-800 text-xl" title="Удалить смену">🗑️</button>
@@ -1619,7 +1763,7 @@
                                 <select id="shift-location" 
                                     class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500">
                                     ${Object.entries(LOCATIONS).map(([key, loc]) => 
-                                        `<option value="${key}">${loc.name} (${loc.fullHours}ч = ${loc.fullSalary}₸)</option>`
+                                        `<option value="${key}">${loc.name} (${loc.fullHours}ч = ${loc.weekdaySalary}₸)</option>`
                                     ).join('')}
                                 </select>
                             </div>
@@ -1756,6 +1900,8 @@
                                     <th class="px-4 py-3 text-right font-semibold text-gray-700">Время</th>
                                     <th class="px-4 py-3 text-right font-semibold text-gray-700">Часы</th>
                                     <th class="px-4 py-3 text-right font-semibold text-gray-700">Касса</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">ЗП (оклад)</th>
+                                    <th class="px-4 py-3 text-right font-semibold text-gray-700">ЗП (процент)</th>
                                     <th class="px-4 py-3 text-right font-semibold text-gray-700">ЗП</th>
                                     <th class="px-4 py-3 text-center font-semibold text-gray-700">Действия</th>
                                 </tr>
@@ -1763,11 +1909,20 @@
                             <tbody class="divide-y divide-gray-200">
                                 ${monthShifts.map(shift => `
                                     <tr class="hover:bg-gray-50">
-                                        <td class="px-4 py-3 text-gray-700">${shift.date}</td>
+                                        <td class="px-4 py-3 text-gray-700">
+                                            ${shift.date}
+                                            ${shift.isWeekend ? '<span class="text-xs text-orange-600 ml-1">🎉</span>' : ''}
+                                        </td>
                                         <td class="px-4 py-3 text-gray-700">${shift.locationName}</td>
                                         <td class="px-4 py-3 text-right text-gray-700">${shift.startTime}-${shift.endTime}</td>
                                         <td class="px-4 py-3 text-right text-gray-700">${shift.hours.toFixed(1)}ч</td>
                                         <td class="px-4 py-3 text-right text-gray-700">${shift.cash.toLocaleString()}₸</td>
+                                        <td class="px-4 py-3 text-right text-blue-600 font-semibold">
+                                            ${shift.hourlySalary.toFixed(0).toLocaleString()}₸
+                                        </td>
+                                        <td class="px-4 py-3 text-right text-green-600 font-semibold">
+                                            ${shift.cashBonus.toFixed(0).toLocaleString()}₸
+                                        </td>
                                         <td class="px-4 py-3 text-right text-indigo-600 font-bold">
                                             ${(shift.hourlySalary + shift.cashBonus + (shift.autoBonus || 0)).toFixed(0).toLocaleString()}₸
                                             ${(shift.autoBonus || 0) > 0 ? `<div class="text-xs text-green-600">🎁 +${shift.autoBonus}₸</div>` : ''}
@@ -1816,6 +1971,39 @@
             }
         });
         applyDarkMode();
+        
+        const isDev = location.hostname === 'localhost' || 
+                      location.hostname === '127.0.0.1' || 
+                      location.hostname.startsWith('192.168.');
+        
+        if (!isDev) {
+            console.log('🔐 Защита активирована');
+            
+            document.addEventListener('contextmenu', e => e.preventDefault());
+            
+            document.addEventListener('keydown', e => {
+                if (e.ctrlKey && (e.key === 'u' || e.key === 's' || e.key === 'c')) {
+                    e.preventDefault();
+                }
+                if (e.key === 'F12') {
+                    e.preventDefault();
+                }
+            });
+            
+            document.addEventListener('copy', e => e.preventDefault());
+            
+            setInterval(() => {
+                const start = performance.now();
+                debugger;
+                const end = performance.now();
+                if (end - start > 100) {
+                    alert('⚠️ Developer Tools заблокированы!');
+                    window.location.reload();
+                }
+            }, 1000);
+        } else {
+            console.log('🛠️ Режим разработки - защита отключена');
+        }
     </script>
 </body>
 </html>
