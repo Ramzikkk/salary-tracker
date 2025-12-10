@@ -289,13 +289,41 @@
             const settingsDoc = await getDoc(doc(db, 'userSettings', currentUser.uid));
             if (settingsDoc.exists()) {
                 userSettings = settingsDoc.data();
-                // Ensure customSalaries exists
+                
+                // КРИТИЧНО: Проверяем структуру customSalaries (как в loadBaristaSettings)
                 if (!userSettings.customSalaries) {
                     userSettings.customSalaries = {
-                        boxpark: null,
-                        aport: null,
-                        saryarka: null
+                        boxpark: { weekday: null, weekend: null },
+                        aport: { weekday: null, weekend: null },
+                        saryarka: { weekday: null, weekend: null }
                     };
+                } else {
+                    // Конвертируем старую структуру в новую если нужно
+                    Object.keys(LOCATIONS).forEach(key => {
+                        const current = userSettings.customSalaries[key];
+                        
+                        // Если это старая структура (просто число) - конвертируем
+                        if (typeof current === 'number' || current === null) {
+                            userSettings.customSalaries[key] = {
+                                weekday: current,
+                                weekend: current
+                            };
+                        }
+                        // Если это объект, но без weekday/weekend - добавляем
+                        else if (current && !current.hasOwnProperty('weekday')) {
+                            userSettings.customSalaries[key] = {
+                                weekday: null,
+                                weekend: null
+                            };
+                        }
+                        // Если вообще нет - создаём
+                        else if (!current) {
+                            userSettings.customSalaries[key] = {
+                                weekday: null,
+                                weekend: null
+                            };
+                        }
+                    });
                 }
             } else {
                 await setDoc(doc(db, 'userSettings', currentUser.uid), userSettings);
