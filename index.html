@@ -610,21 +610,49 @@
             const settingsDoc = await getDoc(doc(db, 'userSettings', baristaId));
             if (settingsDoc.exists()) {
                 editingBaristaSettings = settingsDoc.data();
-                // Ensure customSalaries exists
+                
+                // КРИТИЧНО: Проверяем структуру customSalaries
                 if (!editingBaristaSettings.customSalaries) {
                     editingBaristaSettings.customSalaries = {
-                        boxpark: null,
-                        aport: null,
-                        saryarka: null
+                        boxpark: { weekday: null, weekend: null },
+                        aport: { weekday: null, weekend: null },
+                        saryarka: { weekday: null, weekend: null }
                     };
+                } else {
+                    // Конвертируем старую структуру в новую если нужно
+                    Object.keys(LOCATIONS).forEach(key => {
+                        const current = editingBaristaSettings.customSalaries[key];
+                        
+                        // Если это старая структура (просто число) - конвертируем
+                        if (typeof current === 'number' || current === null) {
+                            editingBaristaSettings.customSalaries[key] = {
+                                weekday: current,
+                                weekend: current
+                            };
+                        }
+                        // Если это объект, но без weekday/weekend - добавляем
+                        else if (current && !current.hasOwnProperty('weekday')) {
+                            editingBaristaSettings.customSalaries[key] = {
+                                weekday: null,
+                                weekend: null
+                            };
+                        }
+                        // Если вообще нет - создаём
+                        else if (!current) {
+                            editingBaristaSettings.customSalaries[key] = {
+                                weekday: null,
+                                weekend: null
+                            };
+                        }
+                    });
                 }
             } else {
                 editingBaristaSettings = {
                     cashPercent: 3,
                     customSalaries: {
-                        boxpark: null,
-                        aport: null,
-                        saryarka: null
+                        boxpark: { weekday: null, weekend: null },
+                        aport: { weekday: null, weekend: null },
+                        saryarka: { weekday: null, weekend: null }
                     }
                 };
             }
