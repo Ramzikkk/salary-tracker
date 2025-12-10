@@ -631,15 +631,17 @@
             render();
         }
 
-        function updateBaristaSettings(field, dayType, value) {
+        function updateBaristaSettings(field, dayTypeOrValue, value) {
             if (field === 'cashPercent') {
-                editingBaristaSettings.cashPercent = parseFloat(value);
+                // Если это процент - второй параметр это уже значение
+                editingBaristaSettings.cashPercent = parseFloat(dayTypeOrValue);
             } else {
+                // Если это оклад - третий параметр это значение
                 const numValue = value === '' ? null : parseFloat(value);
                 if (!editingBaristaSettings.customSalaries[field]) {
                     editingBaristaSettings.customSalaries[field] = { weekday: null, weekend: null };
                 }
-                editingBaristaSettings.customSalaries[field][dayType] = numValue;
+                editingBaristaSettings.customSalaries[field][dayTypeOrValue] = numValue;
             }
         }
 
