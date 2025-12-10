@@ -6,11 +6,52 @@
     <title>Калькулятор зарплаты</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        /* Анимации */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes slideIn {
+            from { transform: translateX(-100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+        
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        .slide-in { animation: slideIn 0.5s ease-out; }
+        .pulse-once { animation: pulse 0.6s ease-out; }
+        
+        /* Плавные переходы */
+        * { transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease; }
+        
+        /* Тёмная тема */
+        .dark { background: #0f172a; color: #e2e8f0; }
+        .dark .bg-white { background: #1e293b; }
+        .dark .bg-gray-50 { background: #334155; }
+        .dark .bg-gray-100 { background: #1e293b; }
+        .dark .bg-gray-200 { background: #334155; }
+        .dark .text-gray-800 { color: #e2e8f0; }
+        .dark .text-gray-700 { color: #cbd5e1; }
+        .dark .text-gray-600 { color: #94a3b8; }
+        .dark .border-gray-200 { border-color: #334155; }
+        .dark .border-gray-300 { border-color: #475569; }
+        .dark input, .dark select { background: #334155; color: #e2e8f0; border-color: #475569; }
+        .dark input::placeholder { color: #64748b; }
+        
+        /* Hover эффекты */
+        .hover-lift { transition: transform 0.3s ease, box-shadow 0.3s ease; }
+        .hover-lift:hover { transform: translateY(-5px); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.2); }
+    </style>
 </head>
-<body class="bg-gradient-to-br from-gray-100 to-gray-200 min-h-screen">
+<body class="bg-gradient-to-br from-gray-100 to-gray-200 dark:from-gray-900 dark:to-gray-800 min-h-screen">
     <div id="app" class="container mx-auto px-4 py-8 max-w-7xl"></div>
 
     <script type="module">
+        let darkMode = localStorage.getItem('darkMode') === 'true';
         import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
         import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
         import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, query, where, setDoc, getDoc, orderBy } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
@@ -82,6 +123,60 @@
         window.saveBaristaSettings = saveBaristaSettings;
         window.closeBaristaSettings = closeBaristaSettings;
         window.updateTimeFromSlider = updateTimeFromSlider;
+        window.toggleDarkMode = toggleDarkMode;
+
+        function getAnalytics(shiftsArray) {
+            const last7Days = [];
+            const today = new Date();
+            
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                const dateStr = date.toISOString().split('T')[0];
+                
+                const dayShifts = shiftsArray.filter(s => s.date === dateStr);
+                const dayEarnings = dayShifts.reduce((sum, s) => 
+                    sum + s.hourlySalary + s.cashBonus + (s.autoBonus || 0), 0);
+                
+                last7Days.push({
+                    date: dateStr,
+                    shifts: dayShifts.length,
+                    earnings: dayEarnings
+                });
+            }
+            
+            // Средние показатели
+            const avgShiftsPerDay = shiftsArray.length / 30 || 0;
+            const totalEarnings = shiftsArray.reduce((sum, s) => 
+                sum + s.hourlySalary + s.cashBonus + (s.autoBonus || 0), 0);
+            const avgEarningsPerShift = shiftsArray.length ? totalEarnings / shiftsArray.length : 0;
+            
+            // Лучший день
+            const bestDay = last7Days.reduce((best, day) => 
+                day.earnings > (best?.earnings || 0) ? day : best, null);
+            
+            return {
+                last7Days,
+                avgShiftsPerDay: avgShiftsPerDay.toFixed(1),
+                avgEarningsPerShift: avgEarningsPerShift.toFixed(0),
+                bestDay
+            };
+        }
+
+        function toggleDarkMode() {
+            darkMode = !darkMode;
+            localStorage.setItem('darkMode', darkMode);
+            applyDarkMode();
+            render(); // ← ДОБАВЬ ЭТУ СТРОКУ
+        }
+
+        function applyDarkMode() {
+            if (darkMode) {
+                document.body.classList.add('dark');
+            } else {
+                document.body.classList.remove('dark');
+            }
+        }
 
         // === AUTH ===
         async function register() {
@@ -134,10 +229,14 @@
             try {
                 await signInWithEmailAndPassword(auth, email, password);
             } catch (error) {
-                if (error.code === 'auth/user-not-found') {
+                if (error.code === 'auth/invalid-credential') {
+                    alert('❌ Неверный email или пароль!');
+                } else if (error.code === 'auth/user-not-found') {
                     alert('❌ Пользователь не найден!');
                 } else if (error.code === 'auth/wrong-password') {
                     alert('❌ Неверный пароль!');
+                } else if (error.code === 'auth/too-many-requests') {
+                    alert('❌ Слишком много попыток входа! Попробуйте позже.');
                 } else {
                     alert('❌ Ошибка входа: ' + error.message);
                 }
@@ -688,11 +787,199 @@
             }, 100);
         }
 
+        function createTrendChart(shiftsArray) {
+            setTimeout(() => {
+                const canvas = document.getElementById('trend-chart');
+                if (!canvas) return;
+                
+                const last7Days = [];
+                const today = new Date();
+                
+                for (let i = 6; i >= 0; i--) {
+                    const date = new Date(today);
+                    date.setDate(date.getDate() - i);
+                    const dateStr = date.toISOString().split('T')[0];
+                    
+                    const dayShifts = shiftsArray.filter(s => s.date === dateStr);
+                    const dayEarnings = dayShifts.reduce((sum, s) => 
+                        sum + s.hourlySalary + s.cashBonus + (s.autoBonus || 0), 0);
+                    
+                    last7Days.push({
+                        label: new Date(dateStr).toLocaleDateString('ru', { weekday: 'short', day: 'numeric' }),
+                        value: dayEarnings
+                    });
+                }
+                
+                new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: last7Days.map(d => d.label),
+                        datasets: [{
+                            label: 'Заработок (₸)',
+                            data: last7Days.map(d => d.value),
+                            borderColor: 'rgb(79, 70, 229)',
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value.toLocaleString() + '₸';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }, 100);
+        }
+
+        function createHoursChart(shiftsArray) {
+            setTimeout(() => {
+                const canvas = document.getElementById('hours-chart');
+                if (!canvas) return;
+                
+                const hoursBuckets = { '<10ч': 0, '10-14ч': 0, '14-18ч': 0, '>18ч': 0 };
+                
+                shiftsArray.forEach(s => {
+                    if (s.hours < 10) hoursBuckets['<10ч']++;
+                    else if (s.hours < 14) hoursBuckets['10-14ч']++;
+                    else if (s.hours <= 18) hoursBuckets['14-18ч']++;
+                    else hoursBuckets['>18ч']++;
+                });
+                
+                new Chart(canvas, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(hoursBuckets),
+                        datasets: [{
+                            data: Object.values(hoursBuckets),
+                            backgroundColor: [
+                                'rgba(239, 68, 68, 0.7)',
+                                'rgba(245, 158, 11, 0.7)',
+                                'rgba(16, 185, 129, 0.7)',
+                                'rgba(79, 70, 229, 0.7)'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom' }
+                        }
+                    }
+                });
+            }, 100);
+        }
+
+        function createTrendChart2(canvasId, shiftsArray) {
+            setTimeout(() => {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                
+                const last7Days = [];
+                const today = new Date();
+                
+                for (let i = 6; i >= 0; i--) {
+                    const date = new Date(today);
+                    date.setDate(date.getDate() - i);
+                    const dateStr = date.toISOString().split('T')[0];
+                    
+                    const dayShifts = shiftsArray.filter(s => s.date === dateStr);
+                    const dayEarnings = dayShifts.reduce((sum, s) => 
+                        sum + s.hourlySalary + s.cashBonus + (s.autoBonus || 0), 0);
+                    
+                    last7Days.push({
+                        label: new Date(dateStr).toLocaleDateString('ru', { weekday: 'short', day: 'numeric' }),
+                        value: dayEarnings
+                    });
+                }
+                
+                new Chart(canvas, {
+                    type: 'line',
+                    data: {
+                        labels: last7Days.map(d => d.label),
+                        datasets: [{
+                            label: 'Заработок (₸)',
+                            data: last7Days.map(d => d.value),
+                            borderColor: 'rgb(79, 70, 229)',
+                            backgroundColor: 'rgba(79, 70, 229, 0.1)',
+                            tension: 0.4,
+                            fill: true
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                ticks: {
+                                    callback: function(value) {
+                                        return value.toLocaleString() + '₸';
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+            }, 100);
+        }
+
+        function createHoursChart2(canvasId, shiftsArray) {
+            setTimeout(() => {
+                const canvas = document.getElementById(canvasId);
+                if (!canvas) return;
+                
+                const hoursBuckets = { '<10ч': 0, '10-14ч': 0, '14-18ч': 0, '>18ч': 0 };
+                
+                shiftsArray.forEach(s => {
+                    if (s.hours < 10) hoursBuckets['<10ч']++;
+                    else if (s.hours < 14) hoursBuckets['10-14ч']++;
+                    else if (s.hours <= 18) hoursBuckets['14-18ч']++;
+                    else hoursBuckets['>18ч']++;
+                });
+                
+                new Chart(canvas, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(hoursBuckets),
+                        datasets: [{
+                            data: Object.values(hoursBuckets),
+                            backgroundColor: [
+                                'rgba(239, 68, 68, 0.7)',
+                                'rgba(245, 158, 11, 0.7)',
+                                'rgba(16, 185, 129, 0.7)',
+                                'rgba(79, 70, 229, 0.7)'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'bottom' }
+                        }
+                    }
+                });
+            }, 100);
+        }
+
         // === RENDER ===
         function renderAuth() {
             document.getElementById('app').innerHTML = `
-                <div class="max-w-md mx-auto">
-                    <div class="bg-white rounded-2xl shadow-2xl p-8">
+                <div class="max-w-md mx-auto fade-in">
+                    <div class="bg-white rounded-2xl shadow-2xl p-8 hover-lift">
                         <div class="text-center mb-8">
                             <h1 class="text-4xl font-bold text-gray-800 mb-2">☕ Калькулятор</h1>
                             <p class="text-gray-600">Зарплаты барист</p>
@@ -902,21 +1189,27 @@
             });
 
             document.getElementById('app').innerHTML = `
-                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6">
+                <div class="bg-white rounded-2xl shadow-xl p-6 mb-6 fade-in">
                     <div class="flex justify-between items-center flex-wrap gap-4">
                         <div>
                             <h1 class="text-3xl font-bold text-gray-800 mb-2">👔 Панель начальника</h1>
                             <p class="text-gray-600">${userProfile.name} (${currentUser.email})</p>
                         </div>
-                        <button onclick="window.logout()" 
-                            class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
-                            🚪 Выход
-                        </button>
+                        <div class="flex gap-2">
+                            <button onclick="window.toggleDarkMode()" 
+                                class="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-semibold transition">
+                                ${darkMode ? '☀️ Светлая' : '🌙 Тёмная'}
+                            </button>
+                            <button onclick="window.logout()" 
+                                class="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg font-semibold transition">
+                                🚪 Выход
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 ${allBaristas.length > 0 ? `
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">👥 Выберите бариста</h2>
                     <div class="flex flex-wrap gap-2">
                         <button onclick="window.changeBarista('all')" 
@@ -925,7 +1218,7 @@
                         </button>
                         ${allBaristas.map(barista => `
                             <div class="flex gap-1">
-                                <button onclick="window.changeBarista('${barista.id}')" 
+                                <button onclick="window.changeBarista('${barista.id}')"
                                     class="px-4 py-2 rounded-lg font-semibold transition ${selectedBaristaId === barista.id ? 'bg-indigo-600 text-white' : 'bg-gray-200 text-gray-700 hover:bg-gray-300'}">
                                     ☕ ${barista.name}
                                 </button>
@@ -939,7 +1232,7 @@
                 </div>
                 ` : '<div class="bg-yellow-50 border border-yellow-200 p-4 rounded-lg mb-6"><p class="text-yellow-800">Нет зарегистрированных баристов</p></div>'}
 
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">📍 Выберите точку</h2>
                     <div class="flex flex-wrap gap-2">
                         <button onclick="window.changeLocation('all')" 
@@ -956,7 +1249,7 @@
                 </div>
 
                 ${availableMonths.length > 0 ? `
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Выберите период</h2>
                     <div class="flex flex-wrap gap-2">
                         <button onclick="window.changeMonth('all')" 
@@ -979,9 +1272,10 @@
                         const totals = getTotals(data.shifts, data.deductions, data.bonuses);
 
                         return `
-                            <div class="bg-white rounded-xl shadow-lg p-6">
+                            <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                                 <h2 class="text-2xl font-bold text-gray-800 mb-4">☕ ${data.name}</h2>
                                 
+                                <!-- ========== 5 ОСНОВНЫХ КАРТОЧЕК (не трогаем) ========== -->
                                 <div class="grid md:grid-cols-5 gap-4 mb-6">
                                     <div class="bg-blue-50 rounded-lg p-4">
                                         <div class="text-sm text-blue-600 mb-1">Смен</div>
@@ -1005,12 +1299,64 @@
                                         <div class="text-2xl font-bold text-indigo-900">${totals.netTotal.toFixed(0).toLocaleString()}₸</div>
                                     </div>
                                 </div>
+                                <!-- ========== КОНЕЦ 5 ОСНОВНЫХ КАРТОЧЕК ========== -->
 
+                                <!-- ========== 🆕 НОВЫЕ 4 АНАЛИТИЧЕСКИЕ КАРТОЧКИ ========== -->
+                                ${data.shifts.length > 0 ? `
+                                <div class="grid lg:grid-cols-4 gap-4 mb-6">
+                                    <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white">
+                                        <div class="text-sm opacity-90 mb-2">📅 Смен в месяц</div>
+                                        <div class="text-3xl font-bold">${totals.totalShifts}</div>
+                                        <div class="text-xs opacity-75 mt-1">~${(totals.totalShifts / 30 * 7).toFixed(1)} в неделю</div>
+                                    </div>
+                                    
+                                    <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-6 text-white">
+                                        <div class="text-sm opacity-90 mb-2">💰 Средний заработок</div>
+                                        <div class="text-3xl font-bold">${(totals.grossTotal / totals.totalShifts || 0).toFixed(0).toLocaleString()}₸</div>
+                                        <div class="text-xs opacity-75 mt-1">за смену</div>
+                                    </div>
+                                    
+                                    <div class="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-6 text-white">
+                                        <div class="text-sm opacity-90 mb-2">⏰ Средняя продолжительность</div>
+                                        <div class="text-3xl font-bold">${(totals.totalHours / totals.totalShifts || 0).toFixed(1)}ч</div>
+                                        <div class="text-xs opacity-75 mt-1">часов за смену</div>
+                                    </div>
+                                    
+                                    <div class="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl shadow-lg p-6 text-white">
+                                        <div class="text-sm opacity-90 mb-2">📈 Почасовая ставка</div>
+                                        <div class="text-3xl font-bold">${(totals.grossTotal / totals.totalHours || 0).toFixed(0)}₸</div>
+                                        <div class="text-xs opacity-75 mt-1">тенге в час</div>
+                                    </div>
+                                </div>
+                                ` : ''}
+                                <!-- ========== КОНЕЦ 4 АНАЛИТИЧЕСКИХ КАРТОЧЕК ========== -->
+
+                                <!-- ========== 🆕 ГРАФИК ЗАРАБОТКА ПО ТОЧКАМ ========== -->
                                 ${data.shifts.length > 0 && selectedLocation === 'all' ? `
                                 <div class="mb-6">
                                     <h3 class="text-lg font-bold text-gray-800 mb-3">📊 Диаграмма заработка по точкам</h3>
                                     <div class="h-64">
                                         <canvas id="chart-${userId}"></canvas>
+                                    </div>
+                                </div>
+                                ` : ''}
+                                <!-- ========== КОНЕЦ ГРАФИКА ПО ТОЧКАМ ========== -->
+
+                                <!-- ========== 🆕 ДВА НОВЫХ ГРАФИКА ========== -->
+                                ${data.shifts.length > 0 ? `
+                                <div class="grid lg:grid-cols-2 gap-6 mb-6">
+                                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                                        <h3 class="text-lg font-bold text-gray-800 mb-3">📈 Динамика заработка за последние 7 дней</h3>
+                                        <div class="h-64">
+                                            <canvas id="trend-chart-${userId}"></canvas>
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="bg-white rounded-xl shadow-lg p-6 border border-gray-200">
+                                        <h3 class="text-lg font-bold text-gray-800 mb-3">⏰ Распределение по часам</h3>
+                                        <div class="h-64">
+                                            <canvas id="hours-chart-${userId}"></canvas>
+                                        </div>
                                     </div>
                                 </div>
                                 ` : ''}
@@ -1092,10 +1438,14 @@
             `;
 
             // СОЗДАЁМ ГРАФИКИ ДЛЯ КАЖДОГО БАРИСТА
-            if (Object.keys(groupedByBarista).length > 0 && selectedLocation === 'all') {
+            if (Object.keys(groupedByBarista).length > 0) {
                 Object.entries(groupedByBarista).forEach(([userId, data]) => {
                     if (data.shifts.length > 0) {
-                        createChart(`chart-${userId}`, data.shifts);
+                        if (selectedLocation === 'all') {
+                            createChart(`chart-${userId}`, data.shifts);
+                        }
+                        createTrendChart2(`trend-chart-${userId}`, data.shifts);
+                        createHoursChart2(`hours-chart-${userId}`, data.shifts);
                     }
                 });
             }
@@ -1118,6 +1468,10 @@
                             <p class="text-gray-600">☕ Бариста: ${userProfile.name} (${currentUser.email})</p>
                         </div>
                         <div class="flex gap-2">
+                            <button onclick="window.toggleDarkMode()" 
+                                class="px-4 py-2 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-semibold transition">
+                                ${darkMode ? '☀️ Светлая' : '🌙 Тёмная'}
+                            </button>
                             <button onclick="window.toggleSettings()" 
                                 class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition">
                                 ⚙️ Настройки
@@ -1131,7 +1485,7 @@
                 </div>
 
                 ${availableMonths.length > 0 ? `
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">📅 Выберите период</h2>
                     <div class="flex flex-wrap gap-2">
                         <button onclick="window.changeMonth('all')" 
@@ -1189,10 +1543,27 @@
                 </div>
 
                 ${monthShifts.length > 0 ? `
-                <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">📊 Диаграмма заработка по точкам</h2>
                     <div class="h-64">
                         <canvas id="earnings-chart"></canvas>
+                    </div>
+                </div>
+                ` : ''}
+                ${monthShifts.length > 0 ? `
+                <div class="grid lg:grid-cols-2 gap-6 mb-6 fade-in">
+                    <div class="bg-white rounded-xl shadow-lg p-6 hover-lift">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">📈 Динамика заработка за последние 7 дней</h2>
+                        <div class="h-64">
+                            <canvas id="trend-chart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-white rounded-xl shadow-lg p-6 hover-lift">
+                        <h2 class="text-xl font-bold text-gray-800 mb-4">⏰ Распределение по часам</h2>
+                        <div class="h-64">
+                            <canvas id="hours-chart"></canvas>
+                        </div>
                     </div>
                 </div>
                 ` : ''}
@@ -1233,7 +1604,7 @@
                 ` : ''}
 
                 <div class="grid lg:grid-cols-3 gap-6 mb-6">
-                    <div class="bg-white rounded-xl shadow-lg p-6">
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                         <h2 class="text-xl font-bold text-gray-800 mb-4">➕ Добавить смену</h2>
                         
                         <div class="space-y-4">
@@ -1284,7 +1655,7 @@
                         </div>
                     </div>
 
-                    <div class="bg-white rounded-xl shadow-lg p-6">
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                         <h2 class="text-xl font-bold text-gray-800 mb-4">🎁 Премии</h2>
                         
                         <div class="space-y-4 mb-4">
@@ -1314,7 +1685,7 @@
                         ` : '<p class="text-gray-500 text-center py-4">Премий нет</p>'}
                     </div>
 
-                    <div class="bg-white rounded-xl shadow-lg p-6">
+                    <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                         <h2 class="text-xl font-bold text-gray-800 mb-4">💸 Вычеты</h2>
                         
                         <div class="space-y-4 mb-4">
@@ -1344,9 +1715,37 @@
                         ` : '<p class="text-gray-500 text-center py-4">Вычетов нет</p>'}
                     </div>
                 </div>
+                
+                ${monthShifts.length > 0 ? `
+                <div class="grid lg:grid-cols-4 gap-4 mb-6 fade-in">
+                    <div class="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl shadow-lg p-6 text-white hover-lift">
+                        <div class="text-sm opacity-90 mb-2">📅 Смен в месяц</div>
+                        <div class="text-3xl font-bold">${totals.totalShifts}</div>
+                        <div class="text-xs opacity-75 mt-1">~${(totals.totalShifts / 30 * 7).toFixed(1)} в неделю</div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-green-500 to-green-600 rounded-xl shadow-lg p-6 text-white hover-lift">
+                        <div class="text-sm opacity-90 mb-2">💰 Средний заработок</div>
+                        <div class="text-3xl font-bold">${(totals.grossTotal / totals.totalShifts || 0).toFixed(0).toLocaleString()}₸</div>
+                        <div class="text-xs opacity-75 mt-1">за смену</div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl shadow-lg p-6 text-white hover-lift">
+                        <div class="text-sm opacity-90 mb-2">⏰ Средняя продолжительность</div>
+                        <div class="text-3xl font-bold">${(totals.totalHours / totals.totalShifts || 0).toFixed(1)}ч</div>
+                        <div class="text-xs opacity-75 mt-1">часов за смену</div>
+                    </div>
+                    
+                    <div class="bg-gradient-to-br from-amber-500 to-amber-600 rounded-xl shadow-lg p-6 text-white hover-lift">
+                        <div class="text-sm opacity-90 mb-2">📈 Почасовая ставка</div>
+                        <div class="text-3xl font-bold">${(totals.grossTotal / totals.totalHours || 0).toFixed(0)}₸</div>
+                        <div class="text-xs opacity-75 mt-1">тенге в час</div>
+                    </div>
+                </div>
+                ` : ''}
 
                 ${monthShifts.length > 0 ? `
-                <div class="bg-white rounded-xl shadow-lg p-6">
+                <div class="bg-white rounded-xl shadow-lg p-6 mb-6 fade-in hover-lift">
                     <h2 class="text-xl font-bold text-gray-800 mb-4">📝 История смен</h2>
                     <div class="overflow-x-auto">
                         <table class="w-full text-sm">
@@ -1388,8 +1787,11 @@
 
             if (monthShifts.length > 0) {
                 createChart('earnings-chart', monthShifts);
+                createTrendChart(monthShifts);
+                createHoursChart(monthShifts);
             }
         }
+
 
         function render() {
             if (!currentUser) {
@@ -1413,6 +1815,7 @@
                 render();
             }
         });
+        applyDarkMode();
     </script>
 </body>
 </html>
